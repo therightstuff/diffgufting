@@ -1,0 +1,10 @@
+Current branding uses the user-supplied legally-human.jpeg replacement.
+The original photograph-based branding is superseded and is not used in application or distribution assets.
+Built-in image_gen extracted the large left head for diffgusting-logo.png and the small right head for diffgusting-icon.png on 2026-09-14.
+Both PNG masters have alpha channels. scripts/export-icons.mjs derives platform sizes and containers with nearest-neighbor resizing.
+
+Logo prompt:
+Edit task: extract the LARGE LEFT pixel-art head from this supplied image as a standalone square PNG logo with transparent background. Use the exact supplied human face artwork, not a dog face. Preserve all original artwork details and pixel shapes: shaggy black hair, floppy black ears, wide mismatched red and green eyes, tan skin and beard, crooked teeth and turquoise collar. Remove only the white background and the smaller right-hand duplicate. Center the complete large head and collar on a transparent square with safe padding, no clipping. Do not redraw, redesign, embellish, recolor or invent a different character. No text, badges or extra objects. This supplied human-face image replaces previous dog branding.
+
+Icon prompt:
+Edit task: extract ONLY the SMALL RIGHT pixel-art human head from the supplied image into a standalone square app-icon PNG with genuine transparent background. Preserve exactly the smaller right-hand artwork and its coarse pixel detail: human face, shaggy black hair, floppy black ears, mismatched red and green eyes, tan beard, crooked teeth, turquoise collar. Remove the white background and the large left-hand head. Center the entire smaller head and collar with safe transparent padding and enlarge with crisp nearest-neighbor pixel edges. Do not redesign, redraw into a different style, smooth, embellish or add detail from the larger head. No text or badge. Use the supplied small image's actual visual identity, not previous dog branding.
