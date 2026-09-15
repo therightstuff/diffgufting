@@ -2,6 +2,67 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Document } from '../src/core/document.mjs';
 
+test('adjacent typing groups until the five-second pause and restores its cursor', () => {
+  const d = new Document('file', '');
+  d.replace('a', { kind: 'typing', time: 0, selection: { anchor: 1, head: 1 } });
+  d.replace('ab', { kind: 'typing', time: 4999, selection: { anchor: 2, head: 2 } });
+  d.replace('abc', { kind: 'typing', time: 9999, selection: { anchor: 3, head: 3 } });
+
+  assert.equal(d.undoGroupDelayMs, 5000);
+  assert.equal(d.past.length, 2);
+  d.undo();
+  assert.equal(d.text, 'ab');
+  assert.deepEqual(d.selection, { anchor: 2, head: 2, scrollTop: 0 });
+  d.undo();
+  assert.equal(d.text, '');
+  assert.deepEqual(d.selection, { anchor: 0, head: 0, scrollTop: 0 });
+});
+
+test('backspaces group separately and undo restores the cursor after deleted text', () => {
+  const d = new Document('file', 'abc');
+  d.replace('ab', { kind: 'backspace', time: 0 });
+  d.replace('a', { kind: 'backspace', time: 1 });
+  assert.equal(d.past.length, 1);
+  d.undo();
+  assert.equal(d.text, 'abc');
+  assert.equal(d.selection.head, 3);
+  d.redo();
+  assert.equal(d.selection.head, 1);
+});
+
+test('replacement is an atomic action whose undo and redo select after inserted text', () => {
+  const d = new Document('file', 'before');
+  d.replace('after', { kind: 'replacement', time: 0 });
+  d.undo();
+  assert.equal(d.text, 'before');
+  assert.equal(d.selection.head, 6);
+  d.redo();
+  assert.equal(d.text, 'after');
+  assert.equal(d.selection.head, 5);
+});
+
+test('five-second boundary, Enter, and explicit navigation close typing groups', () => {
+  const d = new Document('file', '');
+  d.replace('a', { kind: 'typing', time: 0 });
+  d.replace('ab', { kind: 'typing', time: 4999 });
+  d.replace('ab\n', { kind: 'enter', time: 5000 });
+  d.replace('ab\nc', { kind: 'typing', time: 5001 });
+  d.closeHistoryGroup();
+  d.replace('Xab\nc', { kind: 'typing', time: 5002 });
+  assert.equal(d.past.length, 4);
+});
+
+test('group capacity splits safely and rejects an operation too large to retain', () => {
+  const d = new Document('file', '', { historyBytes: 4 });
+  d.replace('a', { kind: 'typing', time: 0 });
+  d.replace('ab', { kind: 'typing', time: 1 });
+  d.replace('abc', { kind: 'typing', time: 2 });
+  assert.equal(d.past.length, 1);
+  assert.equal(d.past[0].changes.length, 1);
+  assert.throws(() => d.replace('x'.repeat(10), { kind: 'paste', time: 3 }), /history/i);
+  assert.equal(d.text, 'abc');
+});
+
 test('clean external reload is undoable and undo does not change disk baseline', () => {
   const d = new Document('file', 'before');
   d.observe({ text: 'after', fingerprint: 'v2' });

@@ -3,6 +3,12 @@ const invoke = (name, ...args) => ipcRenderer.invoke(`diffgusting:${name}`, ...a
 contextBridge.exposeInMainWorld('diffgusting', {
   bootstrap: () => invoke('bootstrap'),
   open: request => invoke('open', request),
+  sourceLoad: (side, descriptor) => invoke('source-load', side, descriptor),
+  sourceState: () => invoke('source-state'),
+  historyOpen: (side, generation) => invoke('history-open', side, generation),
+  historyPage: (id, cursor) => invoke('history-page', id, cursor),
+  historyClose: id => invoke('history-close', id),
+  sourceCommit: (side, generation, ref) => invoke('source-commit', side, generation, ref),
   read: file => invoke('read', file),
   save: request => invoke('save', request),
   saveAs: request => invoke('save-as', request),

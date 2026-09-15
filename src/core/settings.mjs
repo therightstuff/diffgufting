@@ -1,5 +1,6 @@
 export const defaults = Object.freeze({
   historyBytes: 100 * 1024 * 1024,
+  undoGroupDelayMs: 5000,
   reconcileMs: 2000,
   watchDebounceMs: 100,
   operationTimeoutMs: 30000,
@@ -14,7 +15,7 @@ export function settings(input = {}) {
     if (!(key in input)) continue;
     if (typeof defaults[key] === 'number') {
       if (!Number.isSafeInteger(input[key]) || input[key] <= 0) throw new Error(`Invalid ${key}: expected a positive integer`);
-    } else if (typeof input[key] !== 'string') throw new Error(`Invalid ${key}`);
+    } else if (typeof input[key] !== 'string' || (key === 'theme' && !['dark', 'light', 'system'].includes(input[key]))) throw new Error(`Invalid ${key}`);
     result[key] = input[key];
   }
   return result;

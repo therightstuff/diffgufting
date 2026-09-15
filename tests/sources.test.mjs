@@ -64,3 +64,15 @@ test('missing Git reports an actionable prerequisite while filesystem reads stil
     assert.equal((await readSource({ kind: 'file', path: file })).entries[0].text, 'text');
   } finally { process.env.PATH = previous; }
 });
+
+test('source reading reports monotonic file progress before successful completion', async t => {
+  const dir = await fixture(t); const file = path.join(dir, 'large');
+  await writeFile(file, 'x'.repeat(128 * 1024));
+  const updates = [];
+  await readSource({ kind: 'file', path: file }, undefined, update => updates.push(update));
+
+  assert.equal(updates[0].progress, 0);
+  assert.equal(updates.at(-1).progress, 100);
+  assert.ok(updates.some(update => update.progress > 0 && update.progress < 100));
+  assert.ok(updates.every((update, index) => index === 0 || update.progress >= updates[index - 1].progress));
+});

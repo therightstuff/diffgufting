@@ -32,14 +32,34 @@ export async function readDisk(file, options = defaults) {
   }
 }
 
-export async function readSource(source, options = defaults) {
+async function readSourceFile(file, info, options, reportRead) {
+  if (!info.isFile() || info.size > options.maxFileBytes) return readDisk(file, options);
+  let handle;
+  try {
+    handle = await open(file, 'r');
+    const chunks = []; let position = 0;
+    while (position < info.size) {
+      const size = Math.min(64 * 1024, info.size - position); const chunk = Buffer.allocUnsafe(size);
+      const { bytesRead } = await handle.read(chunk, 0, size, position);
+      if (!bytesRead) break;
+      chunks.push(chunk.subarray(0, bytesRead)); position += bytesRead; reportRead(position / info.size);
+    }
+    const bytes = Buffer.concat(chunks);
+    return { ...decode(bytes), fingerprint: fingerprint(bytes), mode: info.mode, kind: 'file' };
+  } catch (error) {
+    return { text: null, fingerprint: `error:${error.code}`, error: `Cannot read ${file}: ${error.message}` };
+  } finally { await handle?.close(); }
+}
+
+export async function readSource(source, options = defaults, reportProgress = () => {}) {
   if (source.kind === 'git') {
     const { readGitSource } = await import('./git.mjs');
-    return readGitSource(source, options);
+    return readGitSource(source, options, reportProgress);
   }
   if (source.kind !== 'file' || typeof source.path !== 'string') throw new Error('Invalid filesystem source');
   const root = path.resolve(source.path);
-  const entries = [];
+  const entries = []; let completed = 0; let discovered = 1;
+  const report = (phase, terminal = false) => reportProgress({ progress: terminal ? 100 : Math.min(95, Math.floor((completed / Math.max(discovered, 1)) * 95)), phase });
   async function visit(absolute, relative) {
     let info;
     try { info = await lstat(absolute); }
@@ -48,17 +68,24 @@ export async function readSource(source, options = defaults) {
       let children;
       try { children = await readdir(absolute); }
       catch (error) { entries.push({ path: relative, absolute, kind: 'unavailable', error: error.message }); return; }
+      discovered += children.length;
       for (const child of children.sort()) {
         if (child === '.git') continue;
         await visit(path.join(absolute, child), relative ? `${relative}/${child}` : child);
       }
     } else {
-      const state = await readDisk(absolute, options);
+      const state = await readSourceFile(absolute, info, options, fraction => {
+        const progress = Math.min(94, Math.floor(((completed + fraction) / Math.max(discovered, 1)) * 95));
+        reportProgress({ progress, phase: 'Reading files' });
+      });
       entries.push({ path: relative, absolute, writable: !state.error, ...state });
     }
+    completed += 1; report('Loading files');
   }
   const info = await lstat(root);
+  reportProgress({ progress: 0, phase: 'Scanning' });
   await visit(root, '');
+  report('Ready', true);
   return { source: { ...source, path: root }, directory: info.isDirectory(), entries };
 }
 

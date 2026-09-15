@@ -6,8 +6,8 @@ import { Text } from '@codemirror/state';
 
 try {
   const { request, options } = workerData;
-  const left = await readSource(request.left, options);
-  const right = await readSource(request.right, options);
+  const left = workerData.left ?? await readSource(request.left, options);
+  const right = workerData.right ?? await readSource(request.right, options);
   const base = request.base ? await readSource(request.base, options) : null;
   if (base && (base.directory || left.directory || right.directory)) throw new Error('Three-way merge requires file sources; select individual files within folders');
   const layers = [];

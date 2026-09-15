@@ -11,6 +11,26 @@ function change(before, after, label) {
   return { start, removed, inserted, label, bytes: (removed.length + inserted.length) * 2 };
 }
 
+function transaction(input) {
+  if (typeof input === 'string') return { kind: input, time: null, ranges: [], selection: null };
+  if (!input || typeof input !== 'object') return { kind: 'edit', time: null, ranges: [], selection: null };
+  return { kind: input.kind ?? 'edit', time: input.time ?? null, ranges: input.ranges ?? [], selection: input.selection ?? null };
+}
+
+function canGroup(entry, delta, next, delay) {
+  if (!['typing', 'backspace', 'delete-forward'].includes(next.kind) || entry.kind !== next.kind || !Number.isFinite(next.time) || !Number.isFinite(entry.lastAt) || next.time - entry.lastAt >= delay) return false;
+  const previous = entry.changes.at(-1);
+  if (next.kind === 'typing') return previous.removed === '' && delta.removed === '' && previous.start + previous.inserted.length === delta.start;
+  if (next.kind === 'backspace') return previous.inserted === '' && delta.inserted === '' && delta.start + delta.removed.length === previous.start;
+  return previous.inserted === '' && delta.inserted === '' && delta.start === previous.start;
+}
+
+function cursorFor(entry, undo) {
+  const delta = undo ? entry.changes[0] : entry.changes.at(-1);
+  const inserted = undo ? delta.removed : delta.inserted;
+  return delta.start + inserted.length;
+}
+
 export class Document {
   constructor(id, text, options = {}) {
     this.id = id;
@@ -22,11 +42,13 @@ export class Document {
     this.past = [];
     this.future = [];
     this.historyBytes = options.historyBytes ?? defaults.historyBytes;
+    this.undoGroupDelayMs = options.undoGroupDelayMs ?? defaults.undoGroupDelayMs;
     this.historyTruncated = false;
     this.listeners = new Set();
     this.version = 0;
     this.writable = options.writable ?? true;
     this.selection = { anchor: 0, head: 0, scrollTop: 0 };
+    this.activeGroup = null;
   }
   get dirty() { return this.text !== this.disk.text; }
   get bytes() { return [...this.past, ...this.future].reduce((sum, entry) => sum + entry.bytes, 0); }
@@ -43,13 +65,26 @@ export class Document {
     while (this.bytes > this.historyBytes && this.past.length > 1) { this.past.shift(); this.historyTruncated = true; }
     while (this.bytes > this.historyBytes && this.future.length) { this.future.shift(); this.historyTruncated = true; }
   }
-  replace(text, label = 'edit') {
+  closeHistoryGroup() { this.activeGroup = null; }
+  replace(text, metadata = 'edit') {
     if (typeof text !== 'string') throw new Error('Document contents must be text');
     if (text === this.text) return false;
-    const entry = change(this.text, text, label);
-    if (entry.bytes > this.historyBytes) throw new Error('History capacity exceeded. Increase the history budget or cancel this change.');
+    // Editor transactions carry semantic kind, monotonic time, changed ranges, and primary selection.
+    const next = transaction(metadata);
+    const delta = change(this.text, text, next.kind);
+    if (delta.bytes > this.historyBytes) throw new Error('History capacity exceeded. Increase the history budget or cancel this change.');
     this.future = [];
-    this.past.push(entry);
+    if (this.activeGroup && canGroup(this.activeGroup, delta, next, this.undoGroupDelayMs) && this.activeGroup.bytes + delta.bytes <= this.historyBytes) {
+      this.activeGroup.changes.push(delta);
+      this.activeGroup.bytes += delta.bytes;
+      this.activeGroup.lastAt = next.time;
+      this.activeGroup.ranges.push(...next.ranges);
+    } else {
+      this.closeHistoryGroup();
+      const entry = { kind: next.kind, changes: [delta], ranges: [...next.ranges], selection: next.selection ?? { ...this.selection }, firstAt: next.time, lastAt: next.time, bytes: delta.bytes };
+      this.past.push(entry);
+      if (['typing', 'backspace', 'delete-forward'].includes(next.kind)) this.activeGroup = entry;
+    }
     this.trim();
     this.text = text;
     this.emit();
@@ -58,7 +93,10 @@ export class Document {
   undo() {
     const entry = this.past.pop();
     if (!entry) return false;
-    this.text = this.text.slice(0, entry.start) + entry.removed + this.text.slice(entry.start + entry.inserted.length);
+    this.closeHistoryGroup();
+    for (const delta of [...entry.changes].reverse()) this.text = this.text.slice(0, delta.start) + delta.removed + this.text.slice(delta.start + delta.inserted.length);
+    const cursor = cursorFor(entry, true);
+    this.selection = { ...this.selection, anchor: cursor, head: cursor };
     this.future.push(entry);
     this.emit();
     return true;
@@ -66,7 +104,10 @@ export class Document {
   redo() {
     const entry = this.future.pop();
     if (!entry) return false;
-    this.text = this.text.slice(0, entry.start) + entry.inserted + this.text.slice(entry.start + entry.removed.length);
+    this.closeHistoryGroup();
+    for (const delta of entry.changes) this.text = this.text.slice(0, delta.start) + delta.inserted + this.text.slice(delta.start + delta.removed.length);
+    const cursor = cursorFor(entry, false);
+    this.selection = { ...this.selection, anchor: cursor, head: cursor };
     this.past.push(entry);
     this.emit();
     return true;
@@ -76,7 +117,7 @@ export class Document {
     if (version.fingerprint === latest.fingerprint && version.text === latest.text) return;
     if (!this.dirty && !this.pending.length && version.text !== null && !version.error) {
       // Reload through the same transaction journal before advancing the disk baseline.
-      this.replace(version.text, 'external reload');
+      this.closeHistoryGroup(); this.replace(version.text, 'external reload');
       this.disk = version;
       this.baseline = version;
     } else this.pending.push({ ...version });
@@ -86,6 +127,7 @@ export class Document {
     const latest = this.pending.at(-1);
     if (!latest || latest.fingerprint !== fingerprint) throw new Error('A newer external version requires review');
     if (latest.error) throw new Error('External contents are unavailable; retry reading before resolving');
+    this.closeHistoryGroup();
     if (choice === 'disk') this.replace(latest.text ?? '', 'accept disk');
     else if (choice === 'merge') this.replace(merged, 'resolve contention');
     else if (choice !== 'local') throw new Error('Unknown review decision');
@@ -96,6 +138,7 @@ export class Document {
     this.emit();
   }
   saved(version) {
+    this.closeHistoryGroup();
     this.disk = version;
     this.baseline = version;
     this.emit();

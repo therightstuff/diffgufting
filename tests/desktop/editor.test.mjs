@@ -7,6 +7,23 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
+test('editor groups typing, isolates Enter, and restores the caret through undo', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-batched-undo-'));
+  const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
+  await writeFile(left, 'left'); await writeFile(right, '');
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_TEST: '1', DIFFGUSTING_SETTINGS_DIR: dir } });
+  t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
+  const page = await app.firstWindow(); const editor = page.locator('[data-side="right"] .cm-content');
+  await editor.waitFor(); const empty = await editor.innerText(); await editor.click(); await page.keyboard.type('ab'); await page.keyboard.press('Enter');
+  const afterEnter = await editor.innerText(); await page.keyboard.type('c');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  assert.equal(await editor.innerText(), afterEnter);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  assert.equal(await editor.innerText(), 'ab');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  assert.equal(await editor.innerText(), empty);
+});
+
 test('desktop edits, reviews disjoint external changes, and preserves undo across layouts', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-desktop-'));
   const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
@@ -87,6 +104,43 @@ test('Git categories coexist in the gutter and canceled changes remain inspectab
   await page.screenshot({ path: 'test-results/git-layers-dark.png' });
 });
 
+test('commit picker closes without selection and replaces the invoking source with a snapshot', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-history-picker-'));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+  const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
+  await writeFile(left, 'first\n'); await writeFile(right, 'right\n'); git('add', '.'); git('commit', '--quiet', '-m', 'first');
+  await writeFile(left, 'second\n'); git('add', 'left.txt'); git('commit', '--quiet', '-m', 'second');
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
+  const page = await app.firstWindow();
+  page.on('dialog', dialog => dialog.accept());
+  await page.locator('#left-source').fill(left); await page.locator('#left-source').press('Enter');
+  await page.locator('#history-dialog').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#history-list').innerText(), /HEAD/);
+  await page.getByRole('button', { name: 'Keep filesystem source' }).click();
+  await page.locator('#history-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#left-source').fill(left); await page.locator('#left-source').press('Enter');
+  await page.locator('#history-dialog').waitFor({ state: 'visible' });
+  await page.locator('#history-list button').first().click();
+  await page.locator('#history-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#right-source').fill(right); await page.locator('#right-source').press('Enter');
+  await page.locator('#history-dialog').waitFor({ state: 'visible' });
+  await page.locator('#history-list button').nth(1).click();
+  await page.locator('#history-dialog').waitFor({ state: 'hidden' });
+  await page.locator('[data-side="left"] .cm-content').waitFor();
+  assert.match(await page.locator('[data-side="left"] .cm-content').innerText(), /second/);
+  assert.match(await page.locator('[data-side="right"] .cm-content').innerText(), /right/);
+  await page.locator('#right-source').fill(left); await page.locator('#right-source').press('Enter');
+  await page.locator('#history-dialog').waitFor({ state: 'visible' });
+  await page.locator('#history-list button').first().click();
+  await page.locator('#history-dialog').waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.querySelector('[data-side="right"] .cm-content')?.textContent.includes('second'));
+  assert.equal(await page.locator('#notice').innerText(), '');
+  await page.locator('#right-progress').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('[data-side="right"] .cm-content').getAttribute('contenteditable'), 'false');
+});
+
 test('renderer runs with an in-browser host adapter and no Electron preload', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-browser-'));
   const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
@@ -99,8 +153,8 @@ test('renderer runs with an in-browser host adapter and no Electron preload', as
     const entry = (text, absolute) => ({ path: '', text, absolute, writable: true, fingerprint: text });
     const left = entry('before\n', '/before'); const right = entry('after\n', '/after');
     window.diffgusting = {
-      bootstrap: async () => ({ ok: true, value: { preferences: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side' }, comparison: { left: { source: { kind: 'file' }, entries: [left] }, right: { source: { kind: 'file' }, entries: [right] }, rows: [{ path: '', left, right, status: 'changed' }], layers: [] } } }),
-      preferences: async value => ({ ok: true, value: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side', ...value } }),
+      bootstrap: async () => ({ ok: true, value: { preferences: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side' }, appearance: 'dark', comparison: { left: { source: { kind: 'file' }, entries: [left] }, right: { source: { kind: 'file' }, entries: [right] }, rows: [{ path: '', left, right, status: 'changed' }], layers: [] } } }),
+      preferences: async value => ({ ok: true, value: { preferences: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side', ...value }, appearance: value.theme === 'light' ? 'light' : 'dark' } }),
       dirty: () => {}, onEvent: () => () => {},
     };
   });

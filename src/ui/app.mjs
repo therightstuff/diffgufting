@@ -13,6 +13,9 @@ const documents = new Map();
 const views = [];
 let comparison = null; let selected = null; let active = null; let resultDocument = null;
 let preferences; let mergeView; let syncing = false; let review; let closeAction; let changeIndex = -1;
+const sourceState = { left: null, right: null };
+const browse = { linked: true, locations: { left: null, right: null }, latest: null };
+let historyPicker = null;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -26,6 +29,11 @@ function button(text, action, className) {
   return node;
 }
 function notice(message = '') { $('#notice').textContent = message; if (message && $('#review').open) $('#review-message').textContent = message; }
+function applyAppearance(state) {
+  preferences = state.preferences;
+  document.documentElement.dataset.theme = state.appearance;
+  $('#theme').value = preferences.theme;
+}
 async function call(method, ...args) {
   const response = await host[method](...args);
   if (!response.ok) { const error = new Error(response.error); error.external = response.external; throw error; }
@@ -49,6 +57,28 @@ function documentFor(entry, side, key) {
 }
 function selection(doc, view) {
   doc.selection = { ...view.state.selection.main, anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop };
+}
+function editKind(transaction) {
+  if (transaction.isUserEvent('input.paste')) return 'paste';
+  if (transaction.isUserEvent('delete.cut')) return 'cut';
+  if (transaction.isUserEvent('input.compose')) return 'composition';
+  if (transaction.isUserEvent('delete.backward')) return 'backspace';
+  if (transaction.isUserEvent('delete.forward')) return 'delete-forward';
+  let inserted = '';
+  transaction.changes.iterChanges((fromA, toA, fromB, toB, text) => { inserted += text.toString(); });
+  if (inserted.includes('\n')) return 'enter';
+  if (transaction.isUserEvent('input.type') && transaction.startState.selection.main.empty) return 'typing';
+  return 'replacement';
+}
+function revealHistorySelection(doc, target = views.find(entry => entry.doc === doc)?.view) {
+  if (!target) return;
+  const position = doc.selection.head;
+  target.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+}
+function runHistory(doc, operation, view) {
+  const changed = doc[operation]();
+  if (changed) revealHistorySelection(doc, view);
+  return changed;
 }
 class CategoryMarker extends GutterMarker {
   constructor(ranges) { super(); this.ranges = ranges; }
@@ -81,14 +111,15 @@ function categoryMarkers(doc, view) {
 }
 function extensions(doc, extra = []) {
   return [lineNumbers(), gutter({ class: 'git-category-gutter', markers: view => categoryMarkers(doc, view) }), highlightActiveLine(), drawSelection(), highlightSelectionMatches(), EditorState.readOnly.of(!doc.writable), EditorView.editable.of(doc.writable),
-    keymap.of([{ key: 'Mod-z', run: () => doc.undo() }, { key: 'Mod-Shift-z', run: () => doc.redo() }, { key: 'Mod-y', run: () => doc.redo() }, { key: 'Mod-s', run: () => { safely(() => save(doc)); return true; } }, ...searchKeymap, ...defaultKeymap]),
-    EditorView.domEventHandlers({ focus: () => { if (!doc.transient) { active = doc; updateStatus(); } } }),
+    keymap.of([{ key: 'Mod-z', run: view => runHistory(doc, 'undo', view) }, { key: 'Mod-Shift-z', run: view => runHistory(doc, 'redo', view) }, { key: 'Mod-y', run: view => runHistory(doc, 'redo', view) }, { key: 'Mod-s', run: () => { safely(() => save(doc)); return true; } }, ...searchKeymap, ...defaultKeymap]),
+    EditorView.domEventHandlers({ focus: () => { if (!doc.transient) { active = doc; updateStatus(); } }, blur: () => doc.closeHistoryGroup() }),
     EditorState.transactionFilter.of(transaction => {
       if (!transaction.docChanged || transaction.annotation(fromModel)) return transaction;
-      try { doc.replace(transaction.newDoc.toString(), 'edit'); return transaction; }
+      const main = transaction.newSelection.main;
+      try { doc.replace(transaction.newDoc.toString(), { kind: editKind(transaction), time: performance.now(), selection: { anchor: main.anchor, head: main.head } }); return transaction; }
       catch (error) { notice(error.message); return []; }
     }),
-    EditorView.updateListener.of(update => { if (update.selectionSet) selection(doc, update.view); }),
+    EditorView.updateListener.of(update => { if (update.selectionSet) { if (!update.docChanged && !update.transactions.some(transaction => transaction.annotation(fromModel))) doc.closeHistoryGroup(); selection(doc, update.view); } }),
     ...extra];
 }
 function mountEditor(doc, mount, extra = []) {
@@ -148,6 +179,12 @@ const layouts = new Map([
 function renderEditors() {
   destroyViews(); $('#content').replaceChildren();
   if (!selected) return;
+  if (!selected.left || !selected.right) {
+    const side = selected.left ? 'left' : 'right';
+    const container = element('div', undefined, 'editors'); $('#content').append(container);
+    pane(documentFor(selected[side], side, selected.path), side, container);
+    syncDocuments(); return;
+  }
   const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path);
   if (!active || ![a, b, resultDocument].includes(active)) active = resultDocument ?? (b.writable ? b : a);
   (layouts.get(preferences.layout) ?? layouts.get('side-by-side'))(a, b, $('#content'));
@@ -212,11 +249,34 @@ function renderFiles() {
   const filter = $('#filter').value.toLowerCase();
   for (const row of comparison.rows) {
     if (!row.path.toLowerCase().includes(filter)) continue;
-    const node = button(row.path || 'File comparison', () => { selected = row; renderEditors(); renderFiles(); }, selected?.path === row.path ? 'selected' : '');
+    const node = button(row.path || 'Selected file', () => { selected = row; renderEditors(); renderFiles(); }, selected?.path === row.path ? 'selected' : '');
     node.append(element('span', row.status, 'badge')); $('#files').append(node);
   }
 }
+function loneComparison() {
+  const ready = ['left', 'right'].filter(side => sourceState[side]?.status === 'ready');
+  if (ready.length !== 1) return null;
+  const side = ready[0]; const tree = sourceState[side].tree;
+  const blank = { source: { kind: 'none' }, entries: [], directory: tree.directory };
+  const result = { left: side === 'left' ? tree : blank, right: side === 'right' ? tree : blank, layers: [], rows: [] };
+  for (const entry of tree.entries) result.rows.push({ path: entry.path, [side]: entry, status: 'loaded' });
+  return result;
+}
+function acceptSource(side, source) {
+  sourceState[side] = source;
+  const ring = $(`#${side}-progress`);
+  const progress = source.progress?.progress;
+  ring.hidden = source.status !== 'loading' && progress !== 100;
+  if (progress !== undefined) { ring.style.setProperty('--progress', progress); ring.setAttribute('aria-valuenow', String(progress)); ring.setAttribute('aria-valuetext', `${source.progress.phase}, ${progress}% estimated`); }
+  if (source.status === 'ready') setTimeout(() => { ring.hidden = true; }, 150);
+  if (source.status === 'error') notice(`${side} · ${source.error}`);
+  else if (source.status === 'ready') notice();
+  const lone = loneComparison();
+  if (lone) { comparison = lone; selected = lone.rows[0] ?? null; renderEditors(); renderFiles(); renderChanges(); }
+}
 function acceptComparison(next, reset = false) {
+  const previous = comparison;
+  const sourcesChanged = !previous || ['left', 'right'].some(side => JSON.stringify(previous[side].source) !== JSON.stringify(next[side].source));
   comparison = next;
   if (reset) {
     destroyViews(); documents.clear(); active = null; resultDocument = null;
@@ -231,8 +291,9 @@ function acceptComparison(next, reset = false) {
       const doc = documents.get(entry.absolute ?? `${side}:${entry.path}`);
       if (doc && !doc.writable && entry.text !== null) { doc.observe(entry); doc.error = entry.error; }
     }
-    if (selected) selected = next.rows.find(row => row.path === selected.path) ?? selected;
-    for (const { view } of views) view.dispatch({});
+    selected = next.rows.find(row => row.path === selected?.path) ?? next.rows[0];
+    if (sourcesChanged) renderEditors();
+    else for (const { view } of views) view.dispatch({});
   }
   renderFiles(); renderChanges();
 }
@@ -249,6 +310,7 @@ function selectPosition(doc, position) {
 function renderChanges() {
   const list = $('#change-list'); list.replaceChildren();
   if (!selected) return;
+  if (!selected.left || !selected.right) return;
   const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path);
   const entries = selected.hunks && a.text === selected.left?.text && b.text === selected.right?.text ? selected.hunks : hunks(a.text, b.text);
   const committedPair = comparison.left.source.kind === 'git' && comparison.right.source.kind === 'git' && !comparison.layers.length;
@@ -308,7 +370,7 @@ async function save(doc = active) {
   if (doc.pending.length) { openReview(doc); return; }
   const state = await call('read', doc.path);
   if (state.fingerprint !== doc.disk.fingerprint) { doc.observe(state); if (doc.pending.length) { openReview(doc); return; } }
-  const text = doc.text;
+  doc.closeHistoryGroup(); const text = doc.text;
   try {
     const saved = await call('save', { path: doc.path, text, fingerprint: doc.disk.fingerprint, format: doc.format });
     doc.reviewArchive.push({ baseline: saved.before, versions: [] });
@@ -377,30 +439,103 @@ $('#accept-disk').onclick = () => safely(() => resolveReview('disk'));
 $('#keep-local').onclick = () => safely(() => resolveReview('local'));
 $('#accept-merge').onclick = () => safely(() => resolveReview('merge'));
 
-const commands = { save: () => save(), 'save-as': () => saveAs(), undo: () => active?.undo(), redo: () => active?.redo() };
+const commands = { save: () => save(), 'save-as': () => saveAs(), undo: () => active && runHistory(active, 'undo'), redo: () => active && runHistory(active, 'redo') };
 for (const [id, action] of Object.entries(commands)) $(`#${id}`).onclick = () => safely(action);
-$('#layout').onchange = () => safely(async () => { preferences = await call('preferences', { layout: $('#layout').value }); renderEditors(); });
-$('#theme').onchange = () => safely(async () => { preferences = await call('preferences', { theme: $('#theme').value }); document.documentElement.dataset.theme = preferences.theme; });
+$('#layout').onchange = () => safely(async () => { applyAppearance(await call('preferences', { layout: $('#layout').value })); renderEditors(); });
+$('#theme').onchange = () => safely(async () => { applyAppearance(await call('preferences', { theme: $('#theme').value })); });
 $('#settings').onclick = () => { $('#history-budget').value = String(preferences.historyBytes / 1024 / 1024); $('#preferences-dialog').showModal(); };
 $('#preferences-cancel').onclick = () => $('#preferences-dialog').close();
 $('#preferences-save').onclick = () => safely(async () => {
   const bytes = Number($('#history-budget').value) * 1024 * 1024;
   for (const doc of documents.values()) if ([...doc.past, ...doc.future].some(entry => entry.bytes > bytes)) throw new Error('The requested budget cannot retain an existing transition');
-  preferences = await call('preferences', { historyBytes: bytes });
+  applyAppearance(await call('preferences', { historyBytes: bytes }));
   for (const doc of documents.values()) doc.setHistoryBudget(bytes);
   $('#preferences-dialog').close();
 });
 $('#filter').oninput = renderFiles;
 $('#refresh').onclick = () => safely(() => call('refresh'));
-for (const side of ['left', 'right']) $(`#choose-${side}`).onclick = () => safely(async () => { const file = await call('choose', $('#directories').checked); if (file) $(`#${side}-source`).value = file; });
-$('#sources').onsubmit = event => { event.preventDefault(); safely(async () => {
+async function protectReplacement() {
   if ([...documents.values()].some(doc => doc.dirty || doc.pending.length)) {
     const choice = await askClose(); if (choice === 'cancel') return;
     if (choice === 'save') { for (const doc of documents.values()) if (doc.dirty && doc.writable) await save(doc); if ([...documents.values()].some(doc => doc.dirty || doc.pending.length)) return; }
   }
-  const result = await call('open', { left: { kind: 'file', path: $('#left-source').value }, right: { kind: 'file', path: $('#right-source').value } });
-  acceptComparison(result, true); notice();
-}); };
+  return true;
+}
+async function loadSource(side, value) {
+  if (!value || !await protectReplacement()) return;
+  const source = await call('sourceLoad', side, { kind: 'file', path: value });
+  acceptSource(side, source); notice();
+}
+for (const side of ['left', 'right']) $(`#choose-${side}`).onclick = () => safely(async () => {
+  const defaultPath = browse.linked ? browse.latest : browse.locations[side];
+  const file = await call('choose', { directory: $('#directories').checked, defaultPath });
+  if (!file) return;
+  $(`#${side}-source`).value = file;
+  const location = $('#directories').checked ? file : file.slice(0, Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1) || file;
+  browse.locations[side] = location; browse.latest = location;
+  if (browse.linked) browse.locations.left = browse.locations.right = location;
+  await loadSource(side, file);
+});
+$('#link-locations').onclick = () => {
+  browse.linked = !browse.linked;
+  if (browse.linked) browse.locations.left = browse.locations.right = browse.latest;
+  $('#link-locations').setAttribute('aria-pressed', String(browse.linked));
+  $('#link-locations').textContent = browse.linked ? 'Linked locations' : 'Independent locations';
+};
+for (const side of ['left', 'right']) {
+  const input = $(`#${side}-source`);
+  let committedValue = input.value;
+  input.onchange = () => {
+    if (input.value === committedValue) return;
+    committedValue = input.value;
+    safely(() => loadSource(side, input.value));
+  };
+  input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); committedValue = input.value; safely(() => loadSource(side, input.value)); } };
+}
+$('#sources').onsubmit = event => event.preventDefault();
+async function showHistory(side, generation) {
+  const opened = await call('historyOpen', side, generation);
+  historyPicker = { side, generation, id: opened.id, cursor: null, loading: false, lanes: [] };
+  $('#history-list').replaceChildren(); $('#history-state').textContent = `History for ${opened.repository.repo}`;
+  $('#history-dialog').showModal(); await nextHistoryPage();
+}
+async function nextHistoryPage() {
+  if (!historyPicker || historyPicker.loading) return;
+  historyPicker.loading = true;
+  try {
+    const page = await call('historyPage', historyPicker.id, historyPicker.cursor);
+    for (const commit of page.commits) {
+      const lane = historyPicker.lanes.indexOf(commit.id);
+      const laneIndex = lane < 0 ? historyPicker.lanes.push(commit.id) - 1 : lane;
+      historyPicker.lanes.splice(laneIndex, 1, ...commit.parents);
+      const row = button('', async () => {
+        const picker = historyPicker;
+        if (!picker) return;
+        try { await call('sourceCommit', picker.side, picker.generation, commit.id); }
+        finally {
+          // A stale selection may fail, but it must never trap the user in a modal backed by a closed source generation.
+          $('#history-dialog').close();
+        }
+      });
+      row.className = 'history-row'; row.title = commit.message;
+      row.append(element('span', `${'│ '.repeat(laneIndex)}●`, 'history-graph'), element('span', commit.subject, 'history-subject'), element('span', commit.refs.join(' · '), 'history-refs'), element('span', `${commit.author} · ${commit.timestamp}`, 'history-meta'), element('code', commit.id, 'history-hash'));
+      $('#history-list').append(row);
+    }
+    while ($('#history-list').childElementCount > 200) $('#history-list').firstElementChild.remove();
+    historyPicker.cursor = page.cursor; $('#history-more').disabled = page.end;
+    if (page.end && !page.commits.length) $('#history-state').textContent = 'No commits are available for this repository.';
+  } finally { historyPicker.loading = false; }
+}
+$('#history-more').onclick = () => safely(nextHistoryPage);
+$('#history-list').onscroll = () => {
+  const list = $('#history-list');
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 40) safely(nextHistoryPage);
+};
+$('#history-close').onclick = () => $('#history-dialog').close();
+$('#history-dialog').addEventListener('close', () => {
+  const picker = historyPicker; historyPicker = null;
+  if (picker) safely(() => call('historyClose', picker.id));
+});
 $('#copy-left').onclick = () => safely(() => transfer(documentFor(selected.right, 'right', selected.path), documentFor(selected.left, 'left', selected.path)));
 $('#copy-right').onclick = () => safely(() => transfer(documentFor(selected.left, 'left', selected.path), documentFor(selected.right, 'right', selected.path)));
 for (const [id, direction] of [['previous', -1], ['next', 1]]) $(`#${id}`).onclick = () => {
@@ -409,7 +544,16 @@ for (const [id, direction] of [['previous', -1], ['next', 1]]) $(`#${id}`).oncli
   if (changes.length) { changeIndex = (changeIndex + direction + changes.length) % changes.length; selectPosition(b, changes[changeIndex].fromB); }
 };
 host.onEvent(event => safely(async () => {
-  if (event.type === 'comparison' && comparison) acceptComparison(event.result);
+  if (event.type === 'comparison') acceptComparison(event.result);
+  else if (event.type === 'source') acceptSource(event.side, event.source);
+  else if (event.type === 'source-progress') { acceptSource(event.side, { ...sourceState[event.side], status: 'loading', progress: event.progress }); notice(`${event.side} · ${event.progress.phase} · ${event.progress.progress}% estimated`); }
+  else if (event.type === 'source-repository') {
+    sourceState[event.side] = { ...sourceState[event.side], repository: event.repository, generation: event.generation };
+    if (window.confirm(`Pick a specific commit for the ${event.side} source?`)) await showHistory(event.side, event.generation);
+  }
+  else if (event.type === 'source-repository-unavailable') notice(`Commit selection unavailable: ${event.error}`);
+  else if (event.type === 'comparison-error') notice(event.error);
+  else if (event.type === 'appearance') applyAppearance(event);
   else if (event.type === 'disk') {
     const doc = documents.get(event.path);
     if (doc) {
@@ -433,9 +577,9 @@ host.onEvent(event => safely(async () => {
   }
 }));
 await safely(async () => {
-  const bootstrap = await call('bootstrap'); preferences = bootstrap.preferences;
-  document.documentElement.dataset.theme = preferences.theme; $('#theme').value = preferences.theme;
+  const bootstrap = await call('bootstrap'); applyAppearance(bootstrap);
   if (bootstrap.comparison?.base) preferences.layout = 'merge';
   $('#layout').value = preferences.layout;
   if (bootstrap.comparison) acceptComparison(bootstrap.comparison, true);
+  if (host.sourceState) Object.assign(sourceState, await call('sourceState'));
 });

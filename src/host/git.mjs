@@ -1,6 +1,8 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { decode, fingerprint, readDisk } from './files.mjs';
 import { defaults } from '../core/settings.mjs';
 const execute = promisify(execFile);
@@ -29,6 +31,82 @@ async function isUnborn(repo, options) {
   const ref = (await git(repo, ['symbolic-ref', '-q', 'HEAD'], options)).toString().trim();
   const refs = (await git(repo, ['for-each-ref', '--format=%(refname)', ref], options)).toString().trim();
   return !refs;
+}
+
+export async function discoverRepository(selected, options = defaults) {
+  const info = await lstat(selected);
+  const directory = info.isDirectory() ? selected : path.dirname(selected);
+  const repo = await rootOf(directory, options);
+  const prefix = (await git(directory, ['rev-parse', '--show-prefix'], options)).toString().trim();
+  return { repo, path: `${prefix}${info.isDirectory() ? '' : path.basename(selected)}`.replaceAll('\\', '/') };
+}
+
+export async function openHistory(repo, { pageSize = 100, options = defaults } = {}) {
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error('History page size must be between 1 and 100');
+  const root = await rootOf(repo, options);
+  const refRecords = (await git(root, ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags'], options)).toString().trim().split('\n').filter(Boolean);
+  const labels = new Map();
+  const refs = refRecords.map(record => {
+    const [id, label] = record.split(' ');
+    if (id && label) labels.set(id, [...(labels.get(id) ?? []), label]);
+    return id;
+  }).filter(Boolean);
+  const head = await git(root, ['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}'], options).then(value => value.toString().trim()).catch(() => null);
+  if (head) labels.set(head, [...(labels.get(head) ?? []), 'HEAD']);
+  const tips = [...new Set([...refs, head].filter(Boolean))];
+  const parseCommit = line => {
+    // Git adds a newline after each record terminator; it is framing, not part of the next hash.
+    const [id, parents, author, timestamp, subject, ...messageParts] = line.split('\x1f');
+    if (!/^[0-9a-f]{40,64}$/.test(id)) throw new Error('Git history returned an invalid commit object ID');
+    const message = messageParts.join('\x1f');
+    return { id, parents: parents ? parents.split(' ').filter(Boolean) : [], author, timestamp, subject, message, refs: labels.get(id) ?? [] };
+  };
+  let closed = false;
+  let ended = !tips.length; let failure; let remainder = ''; const buffered = []; const waiters = [];
+  const wake = () => { while (waiters.length) waiters.shift()(); };
+  const child = tips.length ? spawn('git', ['--no-optional-locks', '-C', root, 'log', '--topo-order', '--date=iso-strict', '--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%B%x1e', '--end-of-options', ...tips], { env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' } }) : null;
+  child?.stdout.setEncoding('utf8');
+  child?.stdout.on('data', chunk => {
+    remainder += chunk;
+    const records = remainder.split('\x1e'); remainder = records.pop();
+    for (const record of records) if (record.trim()) buffered.push(parseCommit(record.replace(/^\n+/, '')));
+    if (buffered.length >= pageSize * 2) child.stdout.pause();
+    wake();
+  });
+  child?.once('error', error => { failure = error; ended = true; wake(); });
+  child?.once('close', code => {
+    if (remainder.trim()) {
+      try { buffered.push(parseCommit(remainder.replace(/^\n+/, ''))); }
+      catch (error) { failure = error; }
+    }
+    if (code && !closed) failure = new Error(`Git log failed with exit code ${code}`);
+    ended = true; wake();
+  });
+  const readPage = async () => {
+    while (!ended && buffered.length < pageSize) {
+      child.stdout.resume();
+      await new Promise(resolve => waiters.push(resolve));
+    }
+    if (failure) throw failure;
+    const commits = buffered.splice(0, pageSize);
+    if (!buffered.length && !ended) {
+      child.stdout.resume();
+      await new Promise(resolve => waiters.push(resolve));
+      if (failure) throw failure;
+    }
+    return commits;
+  };
+  const cursorToken = randomUUID(); let expectedCursor = null; let offset = 0;
+  return {
+    async page(cursor = null) {
+      if (closed) throw new Error('History session is closed');
+      if (cursor !== expectedCursor) throw new Error('Invalid history cursor');
+      const commits = await readPage(); offset += commits.length;
+      expectedCursor = ended && !buffered.length ? null : Buffer.from(`${cursorToken}:${offset}`).toString('base64url');
+      return { commits, cursor: expectedCursor, end: expectedCursor === null };
+    },
+    close() { closed = true; child?.kill(); wake(); },
+  };
 }
 
 export async function readGitSource(input, options = defaults) {
@@ -86,7 +164,8 @@ export async function readGitSource(input, options = defaults) {
     if (state.missing) continue;
     entries.push({ path: key, repoPath: record.path, absolute: source.ref === '@worktree' ? path.join(repo, record.path) : null, writable: source.ref === '@worktree' && !state.error, untracked: !!record.untracked, ...state });
   }
-  return { source, directory: !exact, entries };
+  if (selection && !exact && !entries.length) entries.push({ path: '', repoPath: selection, writable: false, missing: true, fingerprint: 'missing', error: `Path is absent at ${source.ref}` });
+  return { source, directory: selection ? (exact ? false : source.directory ?? true) : true, entries };
 }
 
 export async function gitLayers(source, base = 'HEAD', options = defaults) {

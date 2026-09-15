@@ -1,5 +1,27 @@
 # Changelog
 
+## [independent-source-selection] - 2026-09-15
+
+### Added
+
+- Added independent source loading, linked browse locations, estimated loading progress, and scoped Git commit selection.
+
+### Changed
+
+- Streamed bounded commit-history pages with ref labels and immutable absent-path handling.
+
+## [batch-document-undo] - 2026-09-15
+
+### Changed
+
+- Group adjacent typing and deletion into practical undo steps, with cursor-aware undo and redo.
+
+## [follow-device-theme] - 2026-09-15
+
+### Added
+
+- Added a Device theme option that follows the operating system appearance while preserving explicit Light and Dark choices.
+
 ## [desktop-diff-editor] - 2026-09-14
 
 ### Added
