@@ -11,7 +11,19 @@ On 2026-09-14, Node 25.9.0 and Electron 44.3.0 were used for these checks:
 - The browser-host test initially selected the wrong window during concurrent startup; it was corrected to wait for the main window before creating its isolated browser window, and passed on rerun.
 - All JavaScript syntax checks and strict OpenSpec validation passed. The npm dependency audit reported zero known vulnerabilities. Editor diagnostics and SonarQube tools were unavailable; no claim is made about those analyzers.
 
-The current total is 28 passing automated cases across the focused runs. Screenshots are generated under ignored `test-results/`.
+These historical focused runs covered 28 automated cases. Screenshots are generated under ignored `test-results/`.
+
+## Comparison workspace verification
+
+On 2026-09-15, the comparison workspace change was exercised on macOS Apple Silicon with Node 25.9.0 and Electron 44.3.0:
+
+- 39 core/host tests passed, covering fixed revision metadata and annotated tags, comparison identity and deduplication, concurrent source loading, recent descriptor retention, navigation mapping, and existing editing/Git/filesystem behavior.
+- 13 desktop editor/workspace cases passed across the final suite and focused rerun. Coverage includes retained edits, final-view close cancellation, folder browsing, recent-menu persistence across restart, dirty unfinished-selection protection, moved ref labels, base-relative dirty circles, light/dark changed-text styling, and centered cursor/scroll synchronization across four merge panes. Typing and merge-close assertions explicitly wait for rendered edit state before checking results.
+- The packaged macOS launcher and CLI lifecycle checks passed. The embedded ICNS matches the supplied icon derivative; development startup now explicitly sets the Dock icon from the same icon master.
+- The merge screenshot at `test-results/workspace-merge-navigation.png` was inspected. The native Dock screenshot attempt failed with `could not create image from rect`; visual confirmation of the Dock/application-switcher icon remains unavailable in this environment. Windows/Linux runtime appearance and macOS Intel runtime checks remain outstanding.
+- Build, JavaScript syntax checks, whitespace checks, and strict OpenSpec validation passed. Editor diagnostic and SonarQube tools are unavailable; no analyzer result is claimed.
+
+No dependency versions changed. Existing non-arm64 distributions predate this change and must be rebuilt before testing or distribution.
 
 ## Distribution artifacts
 

@@ -5,6 +5,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { MergeView, unifiedMergeView, diff, Chunk, originalDocChangeEffect, getOriginalDoc } from '@codemirror/merge';
 import { Document } from '../core/document.mjs';
 import { layerRanges } from '../core/change-layers.mjs';
+import { Navigation, fromNavigation } from './navigation.mjs';
 
 const $ = selector => document.querySelector(selector);
 const host = window.diffgusting;
@@ -12,7 +13,9 @@ const fromModel = Annotation.define();
 const documents = new Map();
 const views = [];
 let comparison = null; let selected = null; let active = null; let resultDocument = null;
-let preferences; let mergeView; let syncing = false; let review; let closeAction; let changeIndex = -1;
+let preferences; let mergeView; let syncing = false; let review; let closeAction; let navigation;
+const workspaces = new Map();
+let workspaceId = null; let openComparisons = []; let workspaceChanging = false;
 const sourceState = { left: null, right: null };
 const browse = { linked: true, locations: { left: null, right: null }, latest: null };
 let historyPicker = null;
@@ -44,7 +47,7 @@ async function safely(action) {
 }
 function documentFor(entry, side, key) {
   if (!entry) entry = { text: '', writable: false, fingerprint: 'missing' };
-  const id = entry.absolute ?? `${side}:${key}`;
+  const id = entry.documentId ?? entry.absolute ?? `${workspaceId ?? 'draft'}:${side}:${key}`;
   let doc = documents.get(id);
   if (!doc) {
     doc = new Document(id, entry.text ?? '', { ...preferences, fingerprint: entry.fingerprint, writable: entry.writable ?? false });
@@ -53,10 +56,11 @@ function documentFor(entry, side, key) {
     documents.set(id, doc);
     doc.subscribe(() => queueMicrotask(syncDocuments));
   }
+  workspaces.get(workspaceId)?.documents.add(id);
   return doc;
 }
 function selection(doc, view) {
-  doc.selection = { ...view.state.selection.main, anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop };
+  doc.selection = { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, scrollLeft: view.scrollDOM.scrollLeft };
 }
 function editKind(transaction) {
   if (transaction.isUserEvent('input.paste')) return 'paste';
@@ -96,7 +100,7 @@ function categoryMarkers(doc, view) {
   const byLine = new Map();
   for (const side of ['left', 'right']) {
     const source = selected[side];
-    if (!source || (source.absolute ?? `${side}:${selected.path}`) !== doc.id) continue;
+    if (!source || documentFor(source, side, selected.path).id !== doc.id) continue;
     const ranges = layerRanges(comparison.layers.filter(layer => layer.side === side), source.repoPath ?? selected.path, view.state.doc.toString());
     for (const range of ranges) {
       const start = view.state.doc.lineAt(range.from).number;
@@ -119,18 +123,53 @@ function extensions(doc, extra = []) {
       try { doc.replace(transaction.newDoc.toString(), { kind: editKind(transaction), time: performance.now(), selection: { anchor: main.anchor, head: main.head } }); return transaction; }
       catch (error) { notice(error.message); return []; }
     }),
-    EditorView.updateListener.of(update => { if (update.selectionSet) { if (!update.docChanged && !update.transactions.some(transaction => transaction.annotation(fromModel))) doc.closeHistoryGroup(); selection(doc, update.view); } }),
+    EditorView.updateListener.of(update => {
+      const propagated = update.transactions.some(transaction => transaction.annotation(fromModel) || transaction.annotation(fromNavigation));
+      if (update.selectionSet) {
+        if (!update.docChanged && !propagated) doc.closeHistoryGroup();
+        selection(doc, update.view);
+        if (!doc.transient && !propagated) navigation?.selection(update.view);
+      }
+    }),
     ...extra];
 }
 function mountEditor(doc, mount, extra = []) {
   const view = new EditorView({ parent: mount, state: EditorState.create({ doc: doc.text, selection: { anchor: Math.min(doc.selection.anchor, doc.text.length), head: Math.min(doc.selection.head, doc.text.length) }, extensions: extensions(doc, extra) }) });
   view.scrollDOM.scrollTop = doc.selection.scrollTop;
+  view.scrollDOM.scrollLeft = doc.selection.scrollLeft ?? 0;
   views.push({ doc, view });
   return view;
 }
 function title(doc, side) {
   const node = element('div', undefined, 'pane-title'); node.dataset.document = doc.id;
-  node.append(element('strong', side), element('span', doc.label, 'name'));
+  node.dataset.sourceSide = side;
+  const tree = side === 'result' ? comparison?.base : comparison?.[side];
+  const entry = side === 'result' || side === 'base' ? tree?.entries[0] : selected?.[side];
+  const source = tree?.source;
+  const location = side === 'result' ? doc.path : entry?.absolute ?? (source?.kind === 'git' ? `${source.repo}/${entry?.repoPath ?? source.path ?? ''}` : source?.path ?? doc.label);
+  const pathLabel = element('strong', undefined, 'name'); pathLabel.title = location;
+  const split = Math.max(location.lastIndexOf('/'), location.lastIndexOf('\\')) + 1;
+  pathLabel.append(element('span', location.slice(0, split), 'path-directory'), element('span', location.slice(split), 'file-name'));
+  node.append(element('span', side.toUpperCase(), 'pane-role'), pathLabel);
+  const identity = element('span', undefined, 'source-identity');
+  const revision = tree?.revision;
+  if (revision) {
+    const aliases = workspaces.get(workspaceId)?.aliases;
+    const aliasKey = `${side}:${revision.id}`;
+    const names = revision.labels;
+    const chosen = names.includes(aliases?.[aliasKey]) ? aliases[aliasKey] : names[0] ?? revision.id?.slice(0, 12) ?? 'No commits';
+    if (names.length > 1) {
+      const select = element('select', undefined, 'revision-name'); select.setAttribute('aria-label', `${side} revision display name`); select.title = `Base commit ${revision.id}`;
+      for (const name of names) { const option = element('option', name); option.value = name; select.append(option); }
+      select.value = chosen; select.onchange = () => { if (aliases) aliases[aliasKey] = select.value; };
+      identity.append(select);
+    } else { const label = element('span', chosen, 'revision-name'); label.title = revision.id ?? 'Repository has no commits'; identity.append(label); }
+    node.baseText = entry?.baseText ?? entry?.text ?? '';
+    identity.append(element('span', '', 'base-dirty'));
+    if (revision.working || side === 'result') identity.append(element('span', side === 'result' ? 'Merge result' : ({ '@index': 'Index', '@base': 'Base stage', '@ours': 'Ours stage', '@theirs': 'Theirs stage' })[source.ref] ?? 'Working tree', 'badge'));
+    else identity.append(element('span', 'Snapshot', 'badge'));
+  } else identity.append(element('span', side === 'result' ? 'Merge result' : doc.writable ? 'Working file' : 'Snapshot', 'badge'));
+  node.append(identity);
   if (!doc.writable) node.append(element('span', 'READ ONLY', 'badge'));
   return node;
 }
@@ -143,6 +182,8 @@ function pane(doc, side, parent, extra = []) {
   return node;
 }
 function destroyViews() {
+  navigation?.destroy(); navigation = null;
+  $('#overview').replaceChildren();
   for (const { doc, view } of views) selection(doc, view);
   if (mergeView) { mergeView.destroy(); mergeView = null; }
   else for (const { view } of views) view.destroy();
@@ -157,11 +198,13 @@ const layouts = new Map([
       const container = view.dom.parentElement; container.dataset.side = side; container.prepend(title(doc, side));
       view.dispatch({ selection: { anchor: Math.min(savedSelection.anchor, doc.text.length), head: Math.min(savedSelection.head, doc.text.length) } });
       view.scrollDOM.scrollTop = savedSelection.scrollTop; views.push({ doc, view });
+      view.scrollDOM.scrollLeft = savedSelection.scrollLeft ?? 0;
     }
   }],
   ['unified', (a, b, root) => {
     const container = element('div', undefined, 'editors'); root.append(container);
     pane(b, 'right', container, [unifiedMergeView({ original: a.text, mergeControls: false, syntaxHighlightDeletions: false })]);
+    container.querySelector('.pane').prepend(title(a, 'left'));
     if (!b.error) views.at(-1).original = a;
   }],
   ['merge', (a, b, root) => {
@@ -188,6 +231,7 @@ function renderEditors() {
   const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path);
   if (!active || ![a, b, resultDocument].includes(active)) active = resultDocument ?? (b.writable ? b : a);
   (layouts.get(preferences.layout) ?? layouts.get('side-by-side'))(a, b, $('#content'));
+  navigation = new Navigation(views, $('#overview'));
   syncDocuments();
 }
 function syncDocuments() {
@@ -205,40 +249,118 @@ function syncDocuments() {
       const doc = documents.get(node.dataset.document); if (!doc) continue;
       node.querySelector('.state-label')?.remove();
       const state = element('span', doc.dirty ? 'UNSAVED' : '', 'state-label unsaved'); node.append(state);
+      const circle = node.querySelector('.base-dirty');
+      if (circle) { const dirty = doc.text !== node.baseText; circle.textContent = dirty ? '●' : ''; circle.setAttribute('aria-label', dirty ? 'Modified from base commit' : 'Matches base commit'); circle.title = circle.getAttribute('aria-label'); }
       node.querySelector('.review-button')?.remove();
       if (doc.pending.length) node.append(button('Review external change', () => openReview(doc), 'review-button contention'));
     }
     renderDocuments(); renderChanges(); updateStatus();
+    navigation?.refresh();
     host.dirty([...documents.values()].some(doc => doc.writable && (doc.dirty || doc.pending.length)));
   } finally { syncing = false; }
 }
+function stashWorkspace() {
+  const record = workspaces.get(workspaceId); if (!record) return;
+  for (const { doc, view } of views) selection(doc, view);
+  Object.assign(record, { comparison, selectedPath: selected?.path, activeId: active?.id, resultId: resultDocument?.id, layout: preferences.layout,
+    positions: new Map(views.map(({ doc }) => [doc.id, { ...doc.selection }])), sources: { ...sourceState } });
+}
+function showEmptyWorkspace() {
+  const empty = element('div', undefined, 'empty'); const icon = element('img'); icon.src = '../assets/branding/diffgusting-icon.png'; icon.alt = '';
+  empty.append(icon, element('h1', 'Every change has a story.'), element('p', 'Choose two files or folders to compare, edit, and merge.'));
+  $('#content').replaceChildren(empty);
+}
+function comparisonDocumentIds(result, id) {
+  const ids = new Set();
+  for (const row of result?.rows ?? []) for (const side of ['left', 'right']) {
+    const entry = row[side]; if (entry) ids.add(entry.documentId ?? entry.absolute ?? `${id}:${side}:${row.path}`);
+  }
+  for (const entry of result?.base?.entries ?? []) ids.add(entry.documentId ?? entry.absolute ?? `${id}:base:`);
+  if (result?.output) ids.add(result.output.path);
+  return ids;
+}
+function releaseUnowned(ids) {
+  for (const id of ids) if (![...workspaces.values()].some(record => record.documents.has(id))) documents.delete(id);
+}
+function acceptWorkspace(next, list = openComparisons) {
+  openComparisons = list;
+  if (next?.id === workspaceId) {
+    const record = workspaces.get(workspaceId); if (record) { record.key = next.key; record.label = next.label; }
+    renderDocuments(); return;
+  }
+  stashWorkspace(); workspaceChanging = true; destroyViews();
+  const abandoned = new Set();
+  for (const [id, record] of workspaces) if (id !== next?.id && !list.some(item => item.id === id)) {
+    for (const document of record.documents) abandoned.add(document);
+    workspaces.delete(id);
+  }
+  if ($('#git-choice-dialog').open) $('#git-choice-dialog').close();
+  if ($('#history-dialog').open && !historyPicker?.selecting) $('#history-dialog').close();
+  workspaceId = next?.id ?? null; selected = null; active = null; resultDocument = null; comparison = null;
+  if (!next) { releaseUnowned(abandoned); sourceState.left = sourceState.right = null; showEmptyWorkspace(); renderFiles(); renderDocuments(); workspaceChanging = false; return; }
+  let record = workspaces.get(next.id);
+  if (!record) { record = { documents: new Set(), aliases: {}, layout: next.comparison?.base ? 'merge' : preferences.layout }; workspaces.set(next.id, record); }
+  const nextIds = comparisonDocumentIds(next.comparison, next.id);
+  for (const id of abandoned) if (nextIds.has(id)) record.documents.add(id);
+  releaseUnowned(abandoned);
+  Object.assign(record, { key: next.key, label: next.label });
+  Object.assign(sourceState, next.sources);
+  if (next.key) for (const side of ['left', 'right']) {
+    const descriptor = sourceState[side]?.descriptor;
+    const input = $('#' + side + '-source');
+    input.value = descriptor?.kind === 'git' ? `${descriptor.repo}/${descriptor.path ?? ''}` : descriptor?.path ?? '';
+    input.dataset.committed = input.value;
+  }
+  preferences.layout = record.layout; $('#layout').value = record.layout;
+  for (const [id, position] of record.positions ?? []) if (documents.has(id)) documents.get(id).selection = { ...position };
+  comparison = next.comparison ?? record.comparison;
+  if (comparison) {
+    selected = comparison.rows.find(row => row.path === record.selectedPath) ?? comparison.rows.find(row => row.status !== 'equal') ?? comparison.rows[0];
+    resultDocument = documents.get(record.resultId) ?? null;
+    if (!resultDocument && comparison.output) {
+      resultDocument = documentFor({ ...comparison.output.state, absolute: comparison.output.path, writable: true }, 'result', '');
+      if (comparison.output.state.missing && !resultDocument.past.length) resultDocument.replace(comparison.base?.entries[0]?.text ?? '', 'initialize merge result');
+    }
+    active = documents.get(record.activeId) ?? resultDocument;
+    renderEditors(); renderFiles();
+  } else { const lone = loneComparison(); if (lone) acceptComparison(lone); else showEmptyWorkspace(); }
+  workspaceChanging = false; renderDocuments();
+}
 function renderDocuments() {
   const nav = $('#documents'); nav.replaceChildren();
-  for (const doc of documents.values()) {
-    const row = element('div');
-    row.append(button(`${doc.dirty ? '● ' : ''}${doc.label.split(/[\\/]/).at(-1)}${doc.pending.length ? ' · REVIEW' : ''}`, () => {
-      active = doc;
-      const row = comparison?.rows.find(row => row.left?.absolute === doc.id || row.right?.absolute === doc.id);
-      if (row) { selected = row; renderEditors(); }
-      else {
-        selected = { path: doc.label, left: { text: doc.disk.text ?? '', fingerprint: doc.disk.fingerprint, writable: false }, right: { absolute: doc.path, text: doc.text, fingerprint: doc.disk.fingerprint, writable: doc.writable } };
-        if (comparison?.output?.path === doc.path) resultDocument = doc;
-        renderEditors();
-      }
-      if (doc.pending.length) openReview(doc);
-    }));
-    row.append(button('Close document', () => closeDocument(doc))); nav.append(row);
+  for (const item of openComparisons) {
+    const row = element('div', undefined, 'comparison-item'); row.dataset.comparison = item.id;
+    const label = item.label.split(' ↔ ').map(side => { const [file, ...revision] = side.split(' · '); return [file.split(/[\\/]/).at(-1), ...revision].join(' · '); }).join(' ↔ ');
+    const choose = button(label, () => switchComparison(() => call('comparisonActivate', item.id)), item.id === workspaceId ? 'selected' : '');
+    choose.title = item.label; row.append(choose);
+    const close = button('×', () => closeComparison(item.id), 'close-comparison'); close.setAttribute('aria-label', 'Close comparison'); row.append(close); nav.append(row);
   }
 }
-async function closeDocument(doc) {
-  if (doc.dirty || doc.pending.length) {
-    const choice = await askClose();
-    if (choice === 'cancel') return;
-    if (choice === 'save') { await save(doc); if (doc.dirty || doc.pending.length) return; }
+async function closeComparison(id = workspaceId) {
+  const record = workspaces.get(id); if (!record) return;
+  const final = [...record.documents].filter(key => ![...workspaces].some(([other, value]) => other !== id && value.documents.has(key))).map(key => documents.get(key)).filter(Boolean);
+  if (final.some(doc => doc.dirty || doc.pending.length)) {
+    const choice = await askClose(); if (choice === 'cancel') return;
+    if (choice === 'save') { for (const doc of final) if (doc.writable && (doc.dirty || doc.pending.length)) await save(doc); if (final.some(doc => doc.dirty || doc.pending.length)) return; }
   }
-  destroyViews(); documents.delete(doc.id); selected = null; active = null; resultDocument = null;
-  $('#content').replaceChildren(element('p', 'Select a file to reopen it.')); syncDocuments();
+  await call('comparisonClose', id);
+  workspaces.delete(id);
+  for (const doc of final) documents.delete(doc.id);
+  syncDocuments();
 }
+async function protectDraft() {
+  const record = workspaces.get(workspaceId);
+  if (!record || record.key) return true;
+  const final = [...record.documents].filter(id => ![...workspaces].some(([other, value]) => other !== workspaceId && value.documents.has(id))).map(id => documents.get(id)).filter(Boolean);
+  if (!final.some(doc => doc.dirty || doc.pending.length)) return true;
+  const choice = await askClose(); if (choice === 'cancel') return false;
+  if (choice === 'save') {
+    for (const doc of final) if (doc.writable && (doc.dirty || doc.pending.length)) await save(doc);
+    if (final.some(doc => doc.dirty || doc.pending.length)) return false;
+  }
+  return true;
+}
+async function switchComparison(action) { if (await protectDraft()) return action(); }
 function updateStatus() {
   $('#status').textContent = active ? `${active.dirty ? 'Unsaved' : 'Saved'} · ${active.past.length} undo steps · ${(active.bytes / 1024).toFixed(1)} KiB history${active.historyTruncated ? ' · OLDEST HISTORY EVICTED' : ''}${active.pending.length ? ` · ${active.pending.length} external version(s) need review` : ''}` : 'Ready';
   $('#save').disabled = !active?.writable; $('#undo').disabled = !active?.past.length; $('#redo').disabled = !active?.future.length;
@@ -276,10 +398,18 @@ function acceptSource(side, source) {
 }
 function acceptComparison(next, reset = false) {
   const previous = comparison;
+  const labelsChanged = previous && ['left', 'right'].some(side => JSON.stringify(previous[side].revision) !== JSON.stringify(next[side].revision));
   const sourcesChanged = !previous || ['left', 'right'].some(side => JSON.stringify(previous[side].source) !== JSON.stringify(next[side].source));
   comparison = next;
+  const record = workspaces.get(workspaceId);
+  if (record?.key) {
+    const ids = comparisonDocumentIds(next, workspaceId); const released = [];
+    for (const id of record.extraDocuments ?? []) ids.add(id);
+    for (const id of record.documents) if (!ids.has(id)) { record.documents.delete(id); released.push(id); }
+    releaseUnowned(released);
+  }
   if (reset) {
-    destroyViews(); documents.clear(); active = null; resultDocument = null;
+    destroyViews(); active = null; resultDocument = null;
     selected = next.rows.find(row => row.status !== 'equal') ?? next.rows[0];
     if (next.output) {
       resultDocument = documentFor({ ...next.output.state, absolute: next.output.path, writable: true }, 'result', '');
@@ -288,11 +418,11 @@ function acceptComparison(next, reset = false) {
     renderEditors();
   } else {
     for (const side of ['left', 'right']) for (const entry of next[side].entries) {
-      const doc = documents.get(entry.absolute ?? `${side}:${entry.path}`);
+      const doc = documents.get(entry.documentId ?? entry.absolute ?? `${workspaceId ?? 'draft'}:${side}:${entry.path}`);
       if (doc && !doc.writable && entry.text !== null) { doc.observe(entry); doc.error = entry.error; }
     }
     selected = next.rows.find(row => row.path === selected?.path) ?? next.rows[0];
-    if (sourcesChanged) renderEditors();
+    if (sourcesChanged || labelsChanged) renderEditors();
     else for (const { view } of views) view.dispatch({});
   }
   renderFiles(); renderChanges();
@@ -305,7 +435,7 @@ function transfer(from, to, range = null) {
 }
 function selectPosition(doc, position) {
   const target = views.find(entry => entry.doc === doc);
-  if (target) { const pos = Math.min(position, doc.text.length); target.view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) }); target.view.focus(); }
+  if (target) { const pos = Math.min(position, doc.text.length); target.view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) }); navigation?.selection(target.view, true); target.view.focus(); }
 }
 function renderChanges() {
   const list = $('#change-list'); list.replaceChildren();
@@ -382,6 +512,8 @@ async function saveAs(doc = active) {
   const chosen = await call('saveAs', { path: doc.path });
   if (!chosen) return;
   const target = documentFor({ ...chosen.state, absolute: chosen.path, writable: true }, 'result', '');
+  const record = workspaces.get(workspaceId);
+  if (record) { record.extraDocuments ??= new Set(); record.extraDocuments.add(target.id); }
   target.replace(doc.text, 'save as'); active = target;
   await save(target); syncDocuments();
 }
@@ -441,6 +573,7 @@ $('#accept-merge').onclick = () => safely(() => resolveReview('merge'));
 
 const commands = { save: () => save(), 'save-as': () => saveAs(), undo: () => active && runHistory(active, 'undo'), redo: () => active && runHistory(active, 'redo') };
 for (const [id, action] of Object.entries(commands)) $(`#${id}`).onclick = () => safely(action);
+commands['close-comparison'] = () => closeComparison();
 $('#layout').onchange = () => safely(async () => { applyAppearance(await call('preferences', { layout: $('#layout').value })); renderEditors(); });
 $('#theme').onchange = () => safely(async () => { applyAppearance(await call('preferences', { theme: $('#theme').value })); });
 $('#settings').onclick = () => { $('#history-budget').value = String(preferences.historyBytes / 1024 / 1024); $('#preferences-dialog').showModal(); };
@@ -455,16 +588,12 @@ $('#preferences-save').onclick = () => safely(async () => {
 $('#filter').oninput = renderFiles;
 $('#refresh').onclick = () => safely(() => call('refresh'));
 async function protectReplacement() {
-  if ([...documents.values()].some(doc => doc.dirty || doc.pending.length)) {
-    const choice = await askClose(); if (choice === 'cancel') return;
-    if (choice === 'save') { for (const doc of documents.values()) if (doc.dirty && doc.writable) await save(doc); if ([...documents.values()].some(doc => doc.dirty || doc.pending.length)) return; }
-  }
-  return true;
+  return protectDraft();
 }
 async function loadSource(side, value) {
   if (!value || !await protectReplacement()) return;
-  const source = await call('sourceLoad', side, { kind: 'file', path: value });
-  acceptSource(side, source); notice();
+  await call('sourceLoad', side, { kind: 'file', path: value });
+  notice();
 }
 for (const side of ['left', 'right']) $(`#choose-${side}`).onclick = () => safely(async () => {
   const defaultPath = browse.linked ? browse.latest : browse.locations[side];
@@ -484,13 +613,13 @@ $('#link-locations').onclick = () => {
 };
 for (const side of ['left', 'right']) {
   const input = $(`#${side}-source`);
-  let committedValue = input.value;
+  input.dataset.committed = input.value;
   input.onchange = () => {
-    if (input.value === committedValue) return;
-    committedValue = input.value;
+    if (input.value === input.dataset.committed) return;
+    input.dataset.committed = input.value;
     safely(() => loadSource(side, input.value));
   };
-  input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); committedValue = input.value; safely(() => loadSource(side, input.value)); } };
+  input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); input.dataset.committed = input.value; safely(() => loadSource(side, input.value)); } };
 }
 $('#sources').onsubmit = event => event.preventDefault();
 async function showHistory(side, generation) {
@@ -501,20 +630,24 @@ async function showHistory(side, generation) {
 }
 async function nextHistoryPage() {
   if (!historyPicker || historyPicker.loading) return;
-  historyPicker.loading = true;
+  const currentPicker = historyPicker;
+  currentPicker.loading = true;
   try {
     const page = await call('historyPage', historyPicker.id, historyPicker.cursor);
+    if (historyPicker !== currentPicker) return;
     for (const commit of page.commits) {
       const lane = historyPicker.lanes.indexOf(commit.id);
       const laneIndex = lane < 0 ? historyPicker.lanes.push(commit.id) - 1 : lane;
       historyPicker.lanes.splice(laneIndex, 1, ...commit.parents);
       const row = button('', async () => {
         const picker = historyPicker;
-        if (!picker) return;
+        if (!picker || picker.selecting) return;
+        // Retain the picker until its selection has loaded, even when loading forks the active comparison.
+        picker.selecting = true;
         try { await call('sourceCommit', picker.side, picker.generation, commit.id); }
         finally {
           // A stale selection may fail, but it must never trap the user in a modal backed by a closed source generation.
-          $('#history-dialog').close();
+          if (historyPicker === picker) $('#history-dialog').close();
         }
       });
       row.className = 'history-row'; row.title = commit.message;
@@ -524,7 +657,7 @@ async function nextHistoryPage() {
     while ($('#history-list').childElementCount > 200) $('#history-list').firstElementChild.remove();
     historyPicker.cursor = page.cursor; $('#history-more').disabled = page.end;
     if (page.end && !page.commits.length) $('#history-state').textContent = 'No commits are available for this repository.';
-  } finally { historyPicker.loading = false; }
+  } finally { currentPicker.loading = false; }
 }
 $('#history-more').onclick = () => safely(nextHistoryPage);
 $('#history-list').onscroll = () => {
@@ -538,18 +671,40 @@ $('#history-dialog').addEventListener('close', () => {
 });
 $('#copy-left').onclick = () => safely(() => transfer(documentFor(selected.right, 'right', selected.path), documentFor(selected.left, 'left', selected.path)));
 $('#copy-right').onclick = () => safely(() => transfer(documentFor(selected.left, 'left', selected.path), documentFor(selected.right, 'right', selected.path)));
-for (const [id, direction] of [['previous', -1], ['next', 1]]) $(`#${id}`).onclick = () => {
-  if (!selected) return;
-  const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path); const changes = diff(a.text, b.text);
-  if (changes.length) { changeIndex = (changeIndex + direction + changes.length) % changes.length; selectPosition(b, changes[changeIndex].fromB); }
-};
+for (const [id, direction] of [['previous', -1], ['next', 1]]) $(`#${id}`).onclick = () => navigation?.next(direction);
+let gitChoice;
+function offerGitChoice(event) {
+  if (!event.repository) return;
+  gitChoice = { ...event, workspaceId };
+  $('#git-choice-message').textContent = `Choose a historical Git version for the ${event.side} source? Yes opens the commit picker. No loads or keeps the current working version from disk.`;
+  if (!$('#git-choice-dialog').open) $('#git-choice-dialog').showModal();
+}
+$('#git-choice-no').onclick = () => $('#git-choice-dialog').close();
+$('#git-choice-yes').onclick = () => safely(async () => {
+  const choice = gitChoice; $('#git-choice-dialog').close();
+  if (choice?.workspaceId === workspaceId && sourceState[choice.side]?.generation === choice.generation) await showHistory(choice.side, choice.generation);
+});
 host.onEvent(event => safely(async () => {
+  if (!preferences) return;
+  if (event.type === 'workspace') { acceptWorkspace(event.workspace, event.comparisons); return; }
+  if (event.type === 'recent-open') { await switchComparison(() => call('recentOpen', event.key)); return; }
+  if (event.workspaceId && event.workspaceId !== workspaceId && event.type !== 'disk') return;
   if (event.type === 'comparison') acceptComparison(event.result);
+  else if (event.type === 'source-labels') {
+    if (sourceState[event.side]?.generation !== event.generation) return;
+    if (sourceState[event.side].tree?.revision) sourceState[event.side].tree.revision.labels = event.labels;
+    if (comparison?.[event.side]?.revision) comparison[event.side].revision.labels = event.labels;
+    for (const node of document.querySelectorAll('.pane-title')) {
+      const doc = documents.get(node.dataset.document);
+      if (doc) node.replaceWith(title(doc, node.dataset.sourceSide));
+    }
+    syncDocuments();
+  }
   else if (event.type === 'source') acceptSource(event.side, event.source);
   else if (event.type === 'source-progress') { acceptSource(event.side, { ...sourceState[event.side], status: 'loading', progress: event.progress }); notice(`${event.side} · ${event.progress.phase} · ${event.progress.progress}% estimated`); }
   else if (event.type === 'source-repository') {
     sourceState[event.side] = { ...sourceState[event.side], repository: event.repository, generation: event.generation };
-    if (window.confirm(`Pick a specific commit for the ${event.side} source?`)) await showHistory(event.side, event.generation);
+    if (!workspaceChanging) offerGitChoice(event);
   }
   else if (event.type === 'source-repository-unavailable') notice(`Commit selection unavailable: ${event.error}`);
   else if (event.type === 'comparison-error') notice(event.error);
@@ -570,6 +725,7 @@ host.onEvent(event => safely(async () => {
   else if (event.type === 'error') notice(event.message);
   else if (event.type === 'command') await commands[event.command]?.();
   else if (event.type === 'close-request') {
+    if (![...documents.values()].some(doc => doc.dirty || doc.pending.length)) { host.closeApproved(); return; }
     const choice = await askClose();
     if (choice === 'cancel') return;
     if (choice === 'save') { for (const doc of documents.values()) if (doc.writable && (doc.dirty || doc.pending.length)) await save(doc); if ([...documents.values()].some(doc => doc.writable && (doc.dirty || doc.pending.length))) return; }
@@ -580,6 +736,9 @@ await safely(async () => {
   const bootstrap = await call('bootstrap'); applyAppearance(bootstrap);
   if (bootstrap.comparison?.base) preferences.layout = 'merge';
   $('#layout').value = preferences.layout;
-  if (bootstrap.comparison) acceptComparison(bootstrap.comparison, true);
+  if (bootstrap.workspace) acceptWorkspace(bootstrap.workspace, bootstrap.comparisons);
+  else if (bootstrap.comparison) acceptComparison(bootstrap.comparison, true);
   if (host.sourceState) Object.assign(sourceState, await call('sourceState'));
+  for (const node of document.querySelectorAll('#sources input, #sources button')) node.disabled = false;
+  document.documentElement.dataset.ready = 'true';
 });

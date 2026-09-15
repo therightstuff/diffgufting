@@ -54,7 +54,7 @@ async function readSourceFile(file, info, options, reportRead) {
 export async function readSource(source, options = defaults, reportProgress = () => {}) {
   if (source.kind === 'git') {
     const { readGitSource } = await import('./git.mjs');
-    return readGitSource(source, options, reportProgress);
+    return readGitSource(source, options);
   }
   if (source.kind !== 'file' || typeof source.path !== 'string') throw new Error('Invalid filesystem source');
   const root = path.resolve(source.path);
@@ -86,7 +86,8 @@ export async function readSource(source, options = defaults, reportProgress = ()
   reportProgress({ progress: 0, phase: 'Scanning' });
   await visit(root, '');
   report('Ready', true);
-  return { source: { ...source, path: root }, directory: info.isDirectory(), entries };
+  const { attachRevision } = await import('./git.mjs');
+  return attachRevision({ source: { ...source, path: root }, directory: info.isDirectory(), entries }, options);
 }
 
 export function compareTrees(left, right) {

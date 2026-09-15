@@ -20,6 +20,18 @@ In the source chooser, browsing or committing a path loads that side immediately
 
 Select a file in the tree. Edit either writable side, accept individual differences using the arrow buttons, or copy the whole file. Save writes the focused document. Read-only snapshots can be copied into a writable destination or saved with Save as. Three-way merging requires file sources, a base, and an output path; merge choices modify the output buffer before an explicit save.
 
+## Comparisons and navigation
+
+Open Comparisons lists each selected file/folder path-and-revision pair once. Selecting another revision opens a separate comparison; browsing child files and editing do not add entries. Switching comparisons retains unsaved buffers and undo history. Use the × beside a comparison to close it; closing the final view of unsaved or contested work offers save, discard, or cancel. Leaving an edited unfinished selection for a recent or retained comparison offers the same protection. File → Recent reopens the latest 10 unique comparisons, including after restarting. Recent entries retain paths and fixed revisions, never unsaved buffers or undo history.
+
+Each pane's header shows its file path and source version. Branch and tag names take precedence over a bare commit hash; when several names identify the commit, select which name to display. This selection does not change the compared revision. The full path and hash are available in header tooltips. Working tree identifies live contents. A circle beside a Git revision means the displayed contents differ from that fixed base; saving does not clear the circle while those differences remain. UNSAVED separately identifies changes not yet saved to disk.
+
+The Git version prompt has explicit Yes and No choices. Yes opens the commit picker; No or dismissal keeps the current working version from disk.
+
+Cursor position and both scroll axes follow corresponding content across the active comparison's panes, including base and merge result. Other comparisons keep their own position. The right-side overview marks changes across the whole document and outlines the current viewport. Click a position to center it in every active pane, or focus the overview and use arrows, Page Up/Down, Home, or End. Previous/Next change uses the same coordinated navigation. The overview is empty when there are no differences. Changed characters use stronger background colors within the softer line highlights.
+
+## Layouts and preferences
+
 Side-by-side, unified, and merge layouts share documents and undo history. Adjacent typing and repeated deletion are one undo step until five seconds pass; Enter, paste, cut, replacements, transfers, merges, and reloads are separate steps. Undo and redo place the cursor at the changed text. Use Ctrl/Cmd+F for search, Ctrl/Cmd+S for save, Ctrl/Cmd+Z for undo, and Ctrl/Cmd+Shift+Z for redo. Theme and layout choices persist. Choose Device in the Theme selector to follow the operating system appearance while the app is open; Light and Dark remain fixed choices. Preferences controls the default per-document undo budget, initially 100 MiB. Full settings are stored in Electron's per-user application data directory as `settings.json`; `DIFFGUSTING_SETTINGS_DIR` overrides that directory when an isolated configuration is needed.
 
 ## Git categories

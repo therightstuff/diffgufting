@@ -3,6 +3,9 @@ const invoke = (name, ...args) => ipcRenderer.invoke(`diffgusting:${name}`, ...a
 contextBridge.exposeInMainWorld('diffgusting', {
   bootstrap: () => invoke('bootstrap'),
   open: request => invoke('open', request),
+  comparisonActivate: id => invoke('comparison-activate', id),
+  comparisonClose: id => invoke('comparison-close', id),
+  recentOpen: key => invoke('recent-open', key),
   sourceLoad: (side, descriptor) => invoke('source-load', side, descriptor),
   sourceState: () => invoke('source-state'),
   historyOpen: (side, generation) => invoke('history-open', side, generation),

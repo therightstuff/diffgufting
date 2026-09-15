@@ -2,13 +2,13 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme } from 'electron
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Session } from '../host/session.mjs';
+import { Workspaces, recentComparisons } from '../host/workspaces.mjs';
 import { parseArguments } from '../core/arguments.mjs';
 import { settings } from '../core/settings.mjs';
 import { applyTheme, subscribeToAppearance } from './theme.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-let window; let session; let pendingClose = false; let dirty = false; let preferences = settings(); let appearance = 'dark'; let stopAppearanceUpdates; let initial; let initialComparison;
+let window; let workspaces; let pendingClose = false; let rendererReady = false; let dirty = false; let preferences = settings(); let appearance = 'dark'; let stopAppearanceUpdates; let initial; let initialComparison;
 const send = value => { if (window && !window.isDestroyed()) window.webContents.send('diffgusting:event', value); };
 function preferenceState() { return { preferences, appearance }; }
 function publishAppearance(next) {
@@ -24,22 +24,10 @@ function ipc(name, action) {
   });
 }
 async function openSession(request) {
-  if (!request?.left || !request?.right) throw new Error('Choose two comparison sources');
-  const next = new Session(request, preferences);
-  let comparison;
-  try { comparison = await next.refresh(); }
-  catch (error) { next.close(); throw error; }
-  session?.close(); session = next;
-  session.subscribe(send);
-  await session.start();
-  return comparison;
+  return workspaces.open(request);
 }
 async function ensureSession() {
-  if (session) return session;
-  session = new Session({}, preferences);
-  session.subscribe(send);
-  await session.start();
-  return session;
+  return (workspaces.active ?? await workspaces.ensureDraft()).session;
 }
 async function launch() {
   const rawArgs = process.argv.slice(app.isPackaged ? 1 : 2);
@@ -47,39 +35,64 @@ async function launch() {
   const argv = rawArgs.filter((arg, index) => (separator >= 0 && index >= separator) || !/^--(?:inspect(?:-brk)?|remote-debugging-port)=/.test(arg));
   initial = argv.length ? parseArguments(argv) : null;
   await app.whenReady();
+  app.dock?.setIcon(path.join(root, 'assets/branding/diffgusting-icon.png'));
   const settingsDir = process.env.DIFFGUSTING_SETTINGS_DIR ?? app.getPath('userData');
   const settingsFile = path.join(settingsDir, 'settings.json');
+  const recentFile = path.join(settingsDir, 'recent-comparisons.json');
+  let recent = []; let recentWrite = Promise.resolve();
+  try {
+    const saved = JSON.parse(await readFile(recentFile, 'utf8'));
+    if (saved.version === 1 && Array.isArray(saved.comparisons)) recent = saved.comparisons.filter(item => typeof item.key === 'string' && typeof item.label === 'string' && item.request?.left && item.request?.right).slice(0, 10);
+  } catch (error) { if (error.code !== 'ENOENT') send({ type: 'error', message: `Recent comparisons could not be loaded: ${error.message}` }); }
+  workspaces = new Workspaces(preferences, send, entry => {
+    recent = recentComparisons(recent, entry);
+    const contents = JSON.stringify({ version: 1, comparisons: recent }, null, 2);
+    recentWrite = recentWrite.then(async () => { await mkdir(settingsDir, { recursive: true }); await writeFile(recentFile, contents); }).catch(error => send({ type: 'error', message: `Recent comparisons could not be saved: ${error.message}` }));
+    updateMenu();
+  });
   try { preferences = settings(JSON.parse(await readFile(settingsFile, 'utf8'))); }
   catch (error) { if (error.code !== 'ENOENT') console.error(`Preferences could not be loaded: ${error.message}`); }
+  workspaces.options = preferences;
   appearance = applyTheme(nativeTheme, preferences.theme);
   stopAppearanceUpdates = subscribeToAppearance(nativeTheme, () => preferences.theme, publishAppearance);
   window = new BrowserWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 600, title: 'Diffgusting', show: false, backgroundColor: appearance === 'dark' ? '#171a21' : '#f5f4f0', icon: path.join(root, 'assets/branding/diffgusting-icon.png'), webPreferences: { preload: path.join(root, 'src/desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   const eventMenu = (label, command, accelerator) => ({ label, accelerator, click: () => send({ type: 'command', command }) });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  function updateMenu() { Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    { label: 'File', submenu: [eventMenu('Save', 'save', 'CmdOrCtrl+S'), eventMenu('Save As…', 'save-as', 'CmdOrCtrl+Shift+S'), { role: 'close' }] },
+    { label: 'File', submenu: [{ label: 'Recent', submenu: recent.length ? recent.map(item => ({ label: item.label, click: () => send({ type: 'recent-open', key: item.key }) })) : [{ label: 'No recent comparisons', enabled: false }] }, eventMenu('Save', 'save', 'CmdOrCtrl+S'), eventMenu('Save As…', 'save-as', 'CmdOrCtrl+Shift+S'), eventMenu('Close comparison', 'close-comparison'), { role: 'close' }] },
     { label: 'Edit', submenu: [eventMenu('Undo', 'undo', 'CmdOrCtrl+Z'), eventMenu('Redo', 'redo', 'CmdOrCtrl+Shift+Z'), { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }] },
-  ]));
+  ])); }
+  updateMenu();
   if (initial) initialComparison = await openSession(initial);
-  ipc('bootstrap', async () => ({ ...preferenceState(), comparison: initialComparison ?? null }));
+  ipc('bootstrap', async () => { rendererReady = true; return { ...preferenceState(), comparison: initialComparison ?? null, workspace: workspaces.snapshot(), comparisons: workspaces.list() }; });
   ipc('open', openSession);
-  ipc('source-load', async (side, descriptor) => (await ensureSession()).load(side, descriptor));
+  ipc('comparison-activate', id => workspaces.activate(id));
+  ipc('comparison-close', id => workspaces.remove(id));
+  ipc('recent-open', key => {
+    const item = recent.find(entry => entry.key === key);
+    if (!item) throw new Error('Recent comparison is no longer available');
+    const existing = [...workspaces.records.values()].find(record => record.key === key);
+    return existing ? workspaces.activate(existing.id) : workspaces.open(item.request);
+  });
+  ipc('source-load', (side, descriptor) => workspaces.load(side, descriptor));
   ipc('source-state', async () => {
     const active = await ensureSession();
     return Object.fromEntries(['left', 'right'].map(side => [side, active.snapshot(active.source(side))]));
   });
-  ipc('history-open', (side, generation) => session?.openHistory(side, generation));
-  ipc('history-page', (id, cursor) => session?.historyPage(id, cursor));
-  ipc('history-close', id => session?.closeHistory(id));
-  ipc('source-commit', (side, generation, ref) => session?.selectCommit(side, generation, ref));
-  ipc('read', file => session.read(file));
-  ipc('save', request => session.save(request.path, request.text, request.fingerprint, request.format));
+  const histories = new Map();
+  ipc('history-open', async (side, generation) => { const session = await ensureSession(); const opened = await session.openHistory(side, generation); histories.set(opened.id, session); return opened; });
+  ipc('history-page', (id, cursor) => histories.get(id)?.historyPage(id, cursor));
+  ipc('history-close', id => { histories.get(id)?.closeHistory(id); histories.delete(id); });
+  ipc('source-commit', (side, generation, ref) => workspaces.selectCommit(side, generation, ref));
+  ipc('read', file => workspaces.read(file));
+  ipc('save', request => workspaces.save(request.path, request.text, request.fingerprint, request.format));
   ipc('save-as', async request => {
     const chosen = await dialog.showSaveDialog(window, { defaultPath: request.path });
     if (chosen.canceled) return null;
+    const session = await ensureSession();
     const file = await session.allow(chosen.filePath);
     const state = await session.read(file);
     return { path: file, state };
@@ -90,18 +103,21 @@ async function launch() {
     const chosen = await dialog.showOpenDialog(window, { defaultPath, properties: [choice.directory ? 'openDirectory' : 'openFile'] });
     return chosen.canceled ? null : chosen.filePaths[0];
   });
-  ipc('refresh', () => session?.poll());
+  ipc('refresh', () => workspaces.active?.session.poll());
   ipc('preferences', async value => {
     preferences = settings({ ...preferences, ...value });
+    workspaces.options = preferences;
     appearance = applyTheme(nativeTheme, preferences.theme);
     await mkdir(settingsDir, { recursive: true }); await writeFile(settingsFile, JSON.stringify(preferences, null, 2));
     return preferenceState();
   });
-  ipcMain.on('diffgusting:dirty', (event, value) => { authorize(event); dirty = !!value; });
+  ipcMain.on('diffgusting:dirty', (event, value) => { authorize(event); dirty = !!value; window.setDocumentEdited(dirty); });
   ipcMain.on('diffgusting:close-approved', event => { authorize(event); pendingClose = true; window.close(); });
-  window.on('close', event => { if (dirty && !pendingClose) { event.preventDefault(); send({ type: 'close-request' }); } });
-  window.on('closed', () => session?.close());
-  window.on('focus', () => session?.poll());
+  // Ask the renderer for current state: its latest edit notification can still be in flight.
+  window.webContents.on('render-process-gone', () => { rendererReady = false; });
+  window.on('close', event => { if (!pendingClose && rendererReady) { event.preventDefault(); send({ type: 'close-request' }); } });
+  window.on('closed', () => workspaces.close());
+  window.on('focus', () => workspaces.active?.session.poll());
   window.webContents.once('did-fail-load', (_event, _code, message) => { process.send?.({ error: message }); app.exit(1); });
   await window.loadFile(path.join(root, 'dist/index.html'));
   window.show();

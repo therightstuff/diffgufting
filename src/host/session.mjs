@@ -2,9 +2,10 @@ import { Worker } from 'node:worker_threads';
 import { watch } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { settings } from '../core/settings.mjs';
 import { readDisk, saveDisk } from './files.mjs';
-import { discoverRepository, openHistory } from './git.mjs';
+import { discoverRepository, openHistory, revisionLabels } from './git.mjs';
 
 export class Session {
   constructor(request, options = {}) {
@@ -37,7 +38,7 @@ export class Session {
     if (!descriptor || typeof descriptor !== 'object') throw new Error('Invalid source descriptor');
     const source = this.source(side); const generation = ++source.generation;
     source.cancel?.(); source.worker?.terminate();
-    Object.assign(source, { descriptor, status: 'loading', progress: { progress: 0, phase: 'Starting' }, tree: null, error: null, lastProgressEvent: 0 });
+    Object.assign(source, { descriptor, repository: null, status: 'loading', progress: { progress: 0, phase: 'Starting' }, tree: null, error: null, lastProgressEvent: 0 });
     this.request[side] = descriptor;
     this.emit({ type: 'source', side, generation, source: this.snapshot(source) });
     const worker = new Worker(new URL('./source-worker.mjs', import.meta.url), { workerData: { source: descriptor, options: this.options } });
@@ -48,7 +49,7 @@ export class Session {
         worker.on('message', message => {
           if (message.type === 'progress') {
             if (source.generation !== generation) return;
-            const progress = Math.max(source.progress?.progress ?? 0, message.progress);
+            const progress = Math.max(source.progress?.progress ?? 0, Math.min(99, message.progress));
             source.progress = { progress, phase: message.phase };
             const now = Date.now();
             if (message.progress === 0 || message.progress === 100 || now - source.lastProgressEvent >= 100) {
@@ -63,7 +64,9 @@ export class Session {
       });
       if (this.closed || source.generation !== generation) throw new Error('Source loading canceled');
       await this.authorize(tree);
-      Object.assign(source, { status: 'ready', tree, progress: { progress: 100, phase: 'Ready' } });
+      if (this.closed || source.generation !== generation) throw new Error('Source loading canceled');
+      this.request[side] = tree.source;
+      Object.assign(source, { descriptor: tree.source, repository: tree.repository, status: 'ready', tree, progress: { progress: 100, phase: 'Ready' } });
       this.emit({ type: 'source', side, generation, source: this.snapshot(source) });
       if (descriptor.kind === 'file') this.discover(side, generation, descriptor.path);
       if (this.sources.left.status === 'ready' && this.sources.right.status === 'ready') {
@@ -106,7 +109,7 @@ export class Session {
     const source = this.source(side);
     if (source.generation !== generation || !source.repository) throw new Error('The selected source has no available repository history');
     const history = await openHistory(source.repository.repo, { options: this.options });
-    const id = `${side}:${generation}:${++this.historyGeneration}`;
+    const id = `${side}:${generation}:${++this.historyGeneration}:${randomUUID()}`;
     this.histories ??= new Map(); this.histories.set(id, history);
     return { id, repository: source.repository };
   }
@@ -195,7 +198,17 @@ export class Session {
           this.emit({ type: 'disk', path: file, state });
         }
       }
-      if (!this.worker && this.sources.left.status === 'ready' && this.sources.right.status === 'ready') await this.calculate();
+      if (this.calculateOnPoll !== false) for (const [side, source] of Object.entries(this.sources)) if (source.status === 'ready' && source.tree?.revision) {
+        const tree = source.tree;
+        const labels = await revisionLabels(tree.repository.repo, tree.revision.id, this.options);
+        if (tree === source.tree && JSON.stringify(labels) !== JSON.stringify(tree.revision.labels)) {
+          tree.revision.labels = labels;
+          this.emit({ type: 'source-labels', side, generation: source.generation, labels });
+        }
+      }
+      if (this.calculateOnPoll !== false && !this.worker && this.sources.left.status === 'ready' && this.sources.right.status === 'ready') {
+        await this.calculate();
+      }
     } catch (error) { this.emit({ type: 'error', message: error.message }); }
     finally { this.polling = false; }
   }

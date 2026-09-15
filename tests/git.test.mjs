@@ -6,6 +6,23 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readGitSource, gitLayers, discoverRepository, openHistory } from '../src/host/git.mjs';
 import { Session } from '../src/host/session.mjs';
+import { readSource } from '../src/host/files.mjs';
+
+test('source identity captures fixed base text and peeled branch/tag aliases', async t => {
+  const dir = await repo(t); const file = path.join(dir, 'file');
+  await writeFile(file, 'base'); git(dir, 'add', 'file'); git(dir, 'commit', '--quiet', '-m', 'base');
+  git(dir, 'branch', 'alias'); git(dir, 'tag', '-a', 'release', '-m', 'release');
+  const id = git(dir, 'rev-parse', 'HEAD');
+  await writeFile(file, 'dirty');
+  const tree = await readSource({ kind: 'file', path: file });
+  assert.equal(tree.revision.id, id); assert.equal(tree.entries[0].baseText, 'base');
+  assert.ok(tree.revision.labels.includes('alias')); assert.ok(tree.revision.labels.includes('release'));
+  git(dir, 'add', 'file'); git(dir, 'commit', '--quiet', '-m', 'next');
+  const pinned = await readSource({ ...tree.source, baseCommit: id });
+  assert.equal(pinned.revision.id, id); assert.equal(pinned.entries[0].baseText, 'base');
+  const snapshot = await readGitSource({ kind: 'git', repo: dir, ref: 'release', path: 'file' });
+  assert.equal(snapshot.source.ref, id); assert.equal(snapshot.entries[0].writable, false);
+});
 
 function git(repo, ...args) { return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim(); }
 async function repo(t) {

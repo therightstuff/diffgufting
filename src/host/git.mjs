@@ -41,6 +41,17 @@ export async function discoverRepository(selected, options = defaults) {
   return { repo, path: `${prefix}${info.isDirectory() ? '' : path.basename(selected)}`.replaceAll('\\', '/') };
 }
 
+export async function revisionLabels(repo, id, options = defaults) {
+  if (!id) return [];
+  const labels = [];
+  const records = (await git(repo, ['for-each-ref', '--format=%(refname)%09%(objectname)%09%(*objectname)', 'refs/heads', 'refs/tags', 'refs/remotes'], options)).toString().trim().split('\n');
+  for (const record of records) {
+    const [ref, object, peeled] = record.split('\t');
+    if (object === id || peeled === id) labels.push({ name: ref.replace(/^refs\/(heads|tags|remotes)\//, ''), rank: ref.startsWith('refs/heads/') ? 0 : ref.startsWith('refs/tags/') ? 1 : 2 });
+  }
+  return [...new Set(labels.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)).map(label => label.name))];
+}
+
 export async function openHistory(repo, { pageSize = 100, options = defaults } = {}) {
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error('History page size must be between 1 and 100');
   const root = await rootOf(repo, options);
@@ -109,7 +120,37 @@ export async function openHistory(repo, { pageSize = 100, options = defaults } =
   };
 }
 
-export async function readGitSource(input, options = defaults) {
+export async function attachRevision(tree, options = defaults) {
+  let repository;
+  if (tree.source.kind === 'git') repository = { repo: tree.source.repo, path: tree.source.path ?? '' };
+  else {
+    try { repository = await discoverRepository(tree.source.path, options); }
+    catch (error) { tree.repositoryError = error.message; return tree; }
+  }
+  const source = tree.source;
+  const historical = source.kind === 'git' && !source.ref.startsWith('@');
+  let id;
+  if (historical) id = source.ref;
+  else if (Object.hasOwn(source, 'baseCommit')) id = source.baseCommit;
+  else {
+    try { id = await resolveCommit(repository.repo, 'HEAD', options); }
+    catch (error) { if (!await isUnborn(repository.repo, options)) throw error; id = null; }
+  }
+  tree.repository = repository;
+  tree.revision = { id, labels: await revisionLabels(repository.repo, id, options), working: !historical };
+  tree.source = { ...source, baseCommit: id };
+  let base;
+  if (id && !historical) base = await readGitSource({ kind: 'git', ...repository, ref: id, directory: tree.directory }, options, false);
+  const originals = new Map(base?.entries.map(entry => [entry.repoPath, entry.text]) ?? []);
+  for (const entry of tree.entries) {
+    entry.repoPath ??= [repository.path, entry.path].filter(Boolean).join('/');
+    entry.baseText = historical ? entry.text : originals.get(entry.repoPath) ?? '';
+    if (!entry.writable) entry.documentId = JSON.stringify([repository.repo, entry.repoPath, source.ref, id, entry.fingerprint]);
+  }
+  return tree;
+}
+
+export async function readGitSource(input, options = defaults, withRevision = true) {
   const repo = await rootOf(input.repo, options);
   const selection = relativePath(input.path ?? '');
   const source = { ...input, repo, path: selection };
@@ -165,12 +206,13 @@ export async function readGitSource(input, options = defaults) {
     entries.push({ path: key, repoPath: record.path, absolute: source.ref === '@worktree' ? path.join(repo, record.path) : null, writable: source.ref === '@worktree' && !state.error, untracked: !!record.untracked, ...state });
   }
   if (selection && !exact && !entries.length) entries.push({ path: '', repoPath: selection, writable: false, missing: true, fingerprint: 'missing', error: `Path is absent at ${source.ref}` });
-  return { source, directory: selection ? (exact ? false : source.directory ?? true) : true, entries };
+  const tree = { source, directory: selection ? (exact ? false : source.directory ?? true) : true, entries };
+  return withRevision ? attachRevision(tree, options) : tree;
 }
 
 export async function gitLayers(source, base = 'HEAD', options = defaults) {
   const snapshots = [];
-  for (const ref of [base, 'HEAD', '@index', '@worktree']) snapshots.push(await readGitSource({ ...source, ref }, options));
+  for (const ref of [base, 'HEAD', '@index', '@worktree']) snapshots.push(await readGitSource({ ...source, ref }, options, false));
   const categories = ['committed', 'staged', 'unstaged'];
   return categories.map((category, index) => {
     const a = new Map(snapshots[index].entries.map(e => [e.repoPath, e]));
