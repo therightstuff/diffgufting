@@ -70,3 +70,23 @@ test('concurrent source selection creates one folder comparison and retains expl
   await assert.rejects(workspaces.open(request('does-not-exist')), /Git rev-parse failed/);
   assert.equal(workspaces.active.id, restored);
 });
+
+test('workspaces enforce the configured aggregate open-comparison limit', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-workspace-limit-'));
+  const workspaces = new Workspaces({ openComparisonLimit: 1 });
+  t.after(async () => { workspaces.close(); await rm(dir, { recursive: true, force: true }); });
+  const files = ['a', 'b', 'c'].map(name => path.join(dir, name));
+  await Promise.all(files.map((file, index) => writeFile(file, String(index))));
+  await workspaces.open({ left: { kind: 'file', path: files[0] }, right: { kind: 'file', path: files[1] } });
+  const closing = workspaces.active.session;
+  closing.cache.set('test-cache-entry', 'cached');
+  await assert.rejects(
+    workspaces.open({ left: { kind: 'file', path: files[0] }, right: { kind: 'file', path: files[2] } }),
+    /Open comparison limit \(1\) reached/,
+  );
+  workspaces.remove(workspaces.active.id);
+  assert.equal(workspaces.records.size, 0);
+  assert.equal(closing.closed, true);
+  assert.equal(closing.cache.bytes, 0);
+  assert.equal(closing.watchers.every(watcher => watcher.closed !== false), true);
+});

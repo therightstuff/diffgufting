@@ -6,6 +6,7 @@ import { MergeView, unifiedMergeView, diff, Chunk, originalDocChangeEffect, getO
 import { Document } from '../core/document.mjs';
 import { layerRanges } from '../core/change-layers.mjs';
 import { Navigation, fromNavigation } from './navigation.mjs';
+import { IncrementalDiffs } from '../core/incremental-diff.mjs';
 
 const $ = selector => document.querySelector(selector);
 const host = window.diffgusting;
@@ -17,6 +18,10 @@ let preferences; let mergeView; let syncing = false; let review; let closeAction
 const workspaces = new Map();
 let workspaceId = null; let openComparisons = []; let workspaceChanging = false;
 const sourceState = { left: null, right: null };
+const inventories = { left: null, right: null };
+const diffResults = new IncrementalDiffs();
+let fileRowLimit = 200;
+const expandedDirectories = new Set(['']);
 const browse = { linked: true, locations: { left: null, right: null }, latest: null };
 let historyPicker = null;
 
@@ -34,7 +39,7 @@ function button(text, action, className) {
 function notice(message = '') { $('#notice').textContent = message; if (message && $('#review').open) $('#review-message').textContent = message; }
 function applyAppearance(state) {
   preferences = state.preferences;
-  document.documentElement.dataset.theme = state.appearance;
+  document.documentElement.dataset.theme = preferences.theme === 'system' ? state.appearance : preferences.theme;
   $('#theme').value = preferences.theme;
 }
 async function call(method, ...args) {
@@ -120,7 +125,9 @@ function extensions(doc, extra = []) {
     EditorState.transactionFilter.of(transaction => {
       if (!transaction.docChanged || transaction.annotation(fromModel)) return transaction;
       const main = transaction.newSelection.main;
-      try { doc.replace(transaction.newDoc.toString(), { kind: editKind(transaction), time: performance.now(), selection: { anchor: main.anchor, head: main.head } }); return transaction; }
+      const ranges = [];
+      transaction.changes.iterChanges((fromA, toA, fromB, toB) => ranges.push({ fromA, toA, fromB, toB }));
+      try { doc.replace(transaction.newDoc.toString(), { kind: editKind(transaction), time: performance.now(), ranges, selection: { anchor: main.anchor, head: main.head } }); return transaction; }
       catch (error) { notice(error.message); return []; }
     }),
     EditorView.updateListener.of(update => {
@@ -222,6 +229,11 @@ const layouts = new Map([
 function renderEditors() {
   destroyViews(); $('#content').replaceChildren();
   if (!selected) return;
+  if (selected.left?.lazy || selected.right?.lazy) {
+    call('selectedEntry', selected.path).then(row => { selected = row; renderEditors(); }).catch(error => notice(error.message));
+    $('#content').append(element('p', 'Loading selected file…', 'loading-file'));
+    return;
+  }
   if (!selected.left || !selected.right) {
     const side = selected.left ? 'left' : 'right';
     const container = element('div', undefined, 'editors'); $('#content').append(container);
@@ -231,7 +243,7 @@ function renderEditors() {
   const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path);
   if (!active || ![a, b, resultDocument].includes(active)) active = resultDocument ?? (b.writable ? b : a);
   (layouts.get(preferences.layout) ?? layouts.get('side-by-side'))(a, b, $('#content'));
-  navigation = new Navigation(views, $('#overview'));
+  navigation = new Navigation(views, $('#overview'), diffResults);
   syncDocuments();
 }
 function syncDocuments() {
@@ -367,13 +379,42 @@ function updateStatus() {
 }
 function renderFiles() {
   $('#files').replaceChildren();
-  if (!comparison) return;
+  const rows = comparison?.rows ?? [...new Map(Object.values(inventories).flatMap(inventory => inventory?.entries ?? []).filter(entry => entry.kind !== 'directory').map(entry => [entry.path, { path: entry.path, status: 'pending' }])).values()];
+  const discovered = Object.values(inventories).reduce((count, inventory) => count + (inventory?.entries?.filter(entry => entry.kind !== 'directory').length ?? 0), 0);
+  const incomplete = Object.values(inventories).some(inventory => inventory && !inventory.complete);
+  const canceled = Object.values(inventories).some(inventory => inventory?.canceled);
+  const failed = Object.values(sourceState).some(source => source?.status === 'error');
+  $('#inventory-progress').textContent = comparison ? `${rows.length} compared` : discovered ? `${discovered} discovered${canceled ? ' · canceled' : failed ? ' · incomplete' : incomplete ? ' · checking…' : ' · ready'}` : canceled ? 'canceled' : failed ? 'incomplete' : '';
   const filter = $('#filter').value.toLowerCase();
-  for (const row of comparison.rows) {
-    if (!row.path.toLowerCase().includes(filter)) continue;
-    const node = button(row.path || 'Selected file', () => { selected = row; renderEditors(); renderFiles(); }, selected?.path === row.path ? 'selected' : '');
+  const listing = $('#file-view').value === 'tree' ? treeRows(rows, filter) : rows.filter(row => row.path.toLowerCase().includes(filter));
+  const visibleRows = listing;
+  for (const row of visibleRows.slice(0, fileRowLimit)) {
+    const node = row.directory ? button(`${expandedDirectories.has(row.path) ? '▾' : '▸'} ${row.name}`, () => { if (expandedDirectories.has(row.path)) expandedDirectories.delete(row.path); else expandedDirectories.add(row.path); renderFiles(); }, 'directory') : comparison ? button(row.path || 'Selected file', async () => { selected = await call('selectedEntry', row.path); renderEditors(); renderFiles(); }, selected?.path === row.path ? 'selected' : '') : button(row.path || 'Selected file', () => {}, 'pending');
+    if (row.directory) { node.setAttribute('aria-expanded', String(expandedDirectories.has(row.path))); node.setAttribute('aria-level', String(row.depth + 1)); }
+    else if ($('#file-view').value === 'tree') node.setAttribute('aria-level', String(row.depth + 1));
+    if (row.depth) node.style.paddingInlineStart = `${0.7 + row.depth * 1.1}rem`;
+    if (!comparison) { node.setAttribute('aria-disabled', 'true'); node.setAttribute('aria-label', `${row.path || 'Selected file'} pending comparison`); }
     node.append(element('span', row.status, 'badge')); $('#files').append(node);
   }
+  if (visibleRows.length > fileRowLimit) $('#files').append(button(`Show ${Math.min(fileRowLimit, visibleRows.length - fileRowLimit)} more`, () => { fileRowLimit += 200; renderFiles(); }, 'more-files'));
+}
+function treeRows(rows, filter) {
+  const nodes = new Map([['', { path: '', name: '.', directory: true, depth: 0 }]]);
+  for (const row of rows) {
+    const parts = row.path.split('/');
+    for (let index = 1; index < parts.length; index++) {
+      const path = parts.slice(0, index).join('/');
+      if (!nodes.has(path)) nodes.set(path, { path, name: parts[index - 1], directory: true, depth: index });
+    }
+    nodes.set(row.path, { ...row, name: parts.at(-1) || 'Selected file', depth: parts.length - 1 });
+  }
+  const matched = new Set([...nodes.values()].filter(node => !node.directory && node.path.toLowerCase().includes(filter)).map(node => node.path));
+  for (const path of [...matched]) for (let parent = path; parent.includes('/');) { parent = parent.slice(0, parent.lastIndexOf('/')); matched.add(parent); }
+  return [...nodes.values()].filter(node => node.path && (!filter || matched.has(node.path))).sort((a, b) => a.path.localeCompare(b.path)).filter(node => {
+    if (!node.path.includes('/')) return true;
+    const parent = node.path.slice(0, node.path.lastIndexOf('/'));
+    return filter || expandedDirectories.has(parent);
+  });
 }
 function loneComparison() {
   const ready = ['left', 'right'].filter(side => sourceState[side]?.status === 'ready');
@@ -419,7 +460,7 @@ function acceptComparison(next, reset = false) {
   } else {
     for (const side of ['left', 'right']) for (const entry of next[side].entries) {
       const doc = documents.get(entry.documentId ?? entry.absolute ?? `${workspaceId ?? 'draft'}:${side}:${entry.path}`);
-      if (doc && !doc.writable && entry.text !== null) { doc.observe(entry); doc.error = entry.error; }
+      if (doc && !doc.writable && typeof entry.text === 'string') { doc.observe(entry); doc.error = entry.error; }
     }
     selected = next.rows.find(row => row.path === selected?.path) ?? next.rows[0];
     if (sourcesChanged || labelsChanged) renderEditors();
@@ -442,7 +483,7 @@ function renderChanges() {
   if (!selected) return;
   if (!selected.left || !selected.right) return;
   const a = documentFor(selected.left, 'left', selected.path); const b = documentFor(selected.right, 'right', selected.path);
-  const entries = selected.hunks && a.text === selected.left?.text && b.text === selected.right?.text ? selected.hunks : hunks(a.text, b.text);
+  const entries = currentHunks(a, b);
   const committedPair = comparison.left.source.kind === 'git' && comparison.right.source.kind === 'git' && !comparison.layers.length;
   entries.forEach((entry, index) => {
     const row = element('div', undefined, 'change-row');
@@ -481,6 +522,10 @@ function renderChanges() {
 }
 function hunks(before, after) {
   return Chunk.build(Text.of(before.split('\n')), Text.of(after.split('\n'))).map(chunk => ({ fromA: chunk.fromA, toA: chunk.endA, fromB: chunk.fromB, toB: chunk.endB }));
+}
+function currentHunks(a, b) {
+  if (selected.hunks && a.text === selected.left?.text && b.text === selected.right?.text) return selected.hunks;
+  return diffResults.get(a, b).chunks.map(chunk => ({ fromA: chunk.fromA, toA: chunk.endA, fromB: chunk.fromB, toB: chunk.endB }));
 }
 function mapRange(before, after, from, to) {
   const changes = diff(before, after);
@@ -529,17 +574,31 @@ function plainEditor(text, writable, parent, label, existingDraft = null) {
   view.destroy = () => { unsubscribe(); destroy(); };
   return view;
 }
-function destroyReview() { for (const view of review?.views ?? []) view.destroy(); review = null; $('#review-editors').replaceChildren(); }
+function destroyReview() { clearInterval(review?.poll); for (const view of review?.views ?? []) view.destroy(); review = null; $('#review-editors').replaceChildren(); }
+function refreshReviewVersions(message = null) {
+  if (!review?.doc || !$('#review').open) return;
+  const selector = $('#review-version'); const selectedVersion = selector.value;
+  selector.replaceChildren();
+  review.doc.pending.forEach((version, index) => {
+    const option = element('option', `Version ${index + 1}${version.text === null ? ' · deleted/unavailable' : ''}`); option.value = String(index); selector.append(option);
+  });
+  selector.value = selectedVersion || String(review.doc.pending.length - 1);
+  if (message) $('#review-message').textContent = message;
+}
 function openReview(doc) {
   destroyReview();
   review = { doc, views: [], fingerprint: doc.pending.at(-1)?.fingerprint, draft: new Document(`review:${doc.id}`, doc.text, preferences) };
   $('#review-message').textContent = `${doc.label} changed outside the editor. Every external edit requires your review.`;
-  const selector = $('#review-version'); selector.replaceChildren();
-  doc.pending.forEach((version, index) => { const option = element('option', `Version ${index + 1}${version.text === null ? ' · deleted/unavailable' : ''}`); option.value = String(index); selector.append(option); });
-  selector.value = String(doc.pending.length - 1);
+  const selector = $('#review-version');
   selector.onchange = () => renderReviewVersion(Number(selector.value));
   renderReviewVersion(doc.pending.length - 1);
-  $('#review').showModal();
+  $('#review').showModal(); refreshReviewVersions();
+  review.poll = setInterval(() => safely(async () => {
+    const state = await call('read', doc.path); const latest = doc.pending.at(-1) ?? doc.disk;
+    if (state.fingerprint === latest.fingerprint && state.error === latest.error) return;
+    doc.observe(state);
+    refreshReviewVersions('A newer external version arrived. Your current review and edited result are preserved; select the latest disk version before resolving.');
+  }), 250);
 }
 function renderReviewVersion(index) {
   for (const view of review.views) view.destroy(); review.views = []; $('#review-editors').replaceChildren();
@@ -550,7 +609,11 @@ function renderReviewVersion(index) {
   review.merged = plainEditor(review.doc.text, true, $('#review-editors'), 'Your buffer / editable result', review.draft); review.views.push(review.merged);
 }
 function resolveReview(choice) {
-  review.doc.resolve(review.fingerprint, choice, review.merged.state.doc.toString());
+  // The selector is authoritative at click time; a native select change can
+  // race a renderer event that repopulates its options.
+  const selectedVersion = review.doc.pending[Number($('#review-version').value)];
+  review.doc.resolve(selectedVersion?.fingerprint ?? review.fingerprint, choice, review.merged.state.doc.toString());
+  if (review.doc.writable) active = review.doc;
   $('#review').close(); destroyReview(); syncDocuments();
 }
 function inspectVersions(layer, entry) {
@@ -585,7 +648,8 @@ $('#preferences-save').onclick = () => safely(async () => {
   for (const doc of documents.values()) doc.setHistoryBudget(bytes);
   $('#preferences-dialog').close();
 });
-$('#filter').oninput = renderFiles;
+$('#filter').oninput = () => { fileRowLimit = 200; renderFiles(); };
+$('#file-view').onchange = () => { fileRowLimit = 200; renderFiles(); };
 $('#refresh').onclick = () => safely(() => call('refresh'));
 async function protectReplacement() {
   return protectDraft();
@@ -701,6 +765,7 @@ host.onEvent(event => safely(async () => {
     syncDocuments();
   }
   else if (event.type === 'source') acceptSource(event.side, event.source);
+  else if (event.type === 'source-inventory') { inventories[event.side] = event.inventory; renderFiles(); }
   else if (event.type === 'source-progress') { acceptSource(event.side, { ...sourceState[event.side], status: 'loading', progress: event.progress }); notice(`${event.side} · ${event.progress.phase} · ${event.progress.progress}% estimated`); }
   else if (event.type === 'source-repository') {
     sourceState[event.side] = { ...sourceState[event.side], repository: event.repository, generation: event.generation };
@@ -710,15 +775,12 @@ host.onEvent(event => safely(async () => {
   else if (event.type === 'comparison-error') notice(event.error);
   else if (event.type === 'appearance') applyAppearance(event);
   else if (event.type === 'disk') {
-    const doc = documents.get(event.path);
+    const normalizePath = value => String(value ?? '').replaceAll('\\', '/');
+    const doc = documents.get(event.path) ?? [...documents.values()].find(candidate => normalizePath(candidate.path) === normalizePath(event.path));
     if (doc) {
       doc.observe(event.state);
       if (review?.doc === doc && $('#review').open) {
-        const selector = $('#review-version');
-        for (let i = selector.options.length; i < doc.pending.length; i++) {
-          const option = element('option', `Version ${i + 1}${doc.pending[i].text === null ? ' · deleted/unavailable' : ''}`); option.value = String(i); selector.append(option);
-        }
-        $('#review-message').textContent = 'A newer external version arrived. Your current review and edited result are preserved; select the latest disk version before resolving.';
+        refreshReviewVersions('A newer external version arrived. Your current review and edited result are preserved; select the latest disk version before resolving.');
       }
     }
   }

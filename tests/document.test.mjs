@@ -127,3 +127,22 @@ test('deletion preserves clean buffer and requires explicit review', () => {
   d.resolve('missing', 'local');
   assert.equal(d.dirty, true);
 });
+
+test('document versions retain supplied local edit ranges across undo and redo', () => {
+  const d = new Document('file', 'before');
+  d.replace('beXfore', { kind: 'typing', time: 1, ranges: [{ fromA: 2, toA: 2, fromB: 2, toB: 3 }] });
+  assert.equal(d.lastChange.version, 1);
+  assert.deepEqual(d.lastChange.ranges, [{ fromA: 2, toA: 2, fromB: 2, toB: 3 }]);
+  d.undo(); assert.equal(d.lastChange.kind, 'undo');
+  d.redo(); assert.equal(d.lastChange.kind, 'redo');
+});
+
+test('document transitions retain Unicode, repeated text, long lines, and multiline offsets through undo/redo', () => {
+  const before = `${'same\n'.repeat(3)}שלום\n${'x'.repeat(10_000)}\nend`;
+  const after = `${'same\n'.repeat(2)}inserted\nשלום עולם\n${'x'.repeat(10_000)}\nend`;
+  const d = new Document('complex', before, { historyBytes: 100_000 });
+  d.replace(after, { kind: 'replacement', ranges: [{ fromA: 10, toA: 15, fromB: 10, toB: 28 }] });
+  assert.equal(d.text, after); assert.ok(d.lastChange.delta.removed.includes('same'));
+  d.undo(); assert.equal(d.text, before);
+  d.redo(); assert.equal(d.text, after);
+});

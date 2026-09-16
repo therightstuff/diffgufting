@@ -140,7 +140,7 @@ export async function attachRevision(tree, options = defaults) {
   tree.revision = { id, labels: await revisionLabels(repository.repo, id, options), working: !historical };
   tree.source = { ...source, baseCommit: id };
   let base;
-  if (id && !historical) base = await readGitSource({ kind: 'git', ...repository, ref: id, directory: tree.directory }, options, false);
+  if (id && !historical && !tree.lazy) base = await readGitSource({ kind: 'git', ...repository, ref: id, directory: tree.directory }, options, false);
   const originals = new Map(base?.entries.map(entry => [entry.repoPath, entry.text]) ?? []);
   for (const entry of tree.entries) {
     entry.repoPath ??= [repository.path, entry.path].filter(Boolean).join('/');
@@ -150,7 +150,7 @@ export async function attachRevision(tree, options = defaults) {
   return tree;
 }
 
-export async function readGitSource(input, options = defaults, withRevision = true) {
+export async function readGitSource(input, options = defaults, withRevision = true, lazy = false) {
   const repo = await rootOf(input.repo, options);
   const selection = relativePath(input.path ?? '');
   const source = { ...input, repo, path: selection };
@@ -190,9 +190,14 @@ export async function readGitSource(input, options = defaults, withRevision = tr
     if (selection && record.path !== selection && !record.path.startsWith(`${selection}/`)) continue;
     const key = exact ? '' : selection ? record.path.slice(selection.length + 1) : record.path;
     let state;
-    if (source.ref === '@worktree') state = await readDisk(path.join(repo, record.path), options);
+    if (lazy && source.ref === '@worktree') {
+      const info = await lstat(path.join(repo, record.path)).catch(() => null);
+      state = info ? { text: undefined, fingerprint: `metadata:${info.size}:${info.mtimeMs}`, kind: info.isFile() ? 'file' : 'unavailable', lazy: true } : { text: null, fingerprint: 'missing', missing: true };
+    }
+    else if (source.ref === '@worktree') state = await readDisk(path.join(repo, record.path), options);
     else if (record.conflict) state = { text: null, error: 'Unmerged index: compare @base, @ours, and @theirs', fingerprint: 'unmerged' };
     else if (record.mode === '160000') state = { text: null, error: 'Submodule: compare its repository explicitly', fingerprint: record.oid };
+    else if (lazy) state = { text: undefined, fingerprint: record.oid, kind: 'file', lazy: true };
     else {
       const size = Number((await git(repo, ['cat-file', '-s', record.oid], options)).toString());
       if (size > options.maxFileBytes) state = { text: null, error: 'Git blob exceeds configured editing limit', fingerprint: record.oid };
@@ -206,8 +211,13 @@ export async function readGitSource(input, options = defaults, withRevision = tr
     entries.push({ path: key, repoPath: record.path, absolute: source.ref === '@worktree' ? path.join(repo, record.path) : null, writable: source.ref === '@worktree' && !state.error, untracked: !!record.untracked, ...state });
   }
   if (selection && !exact && !entries.length) entries.push({ path: '', repoPath: selection, writable: false, missing: true, fingerprint: 'missing', error: `Path is absent at ${source.ref}` });
-  const tree = { source, directory: selection ? (exact ? false : source.directory ?? true) : true, entries };
+  const tree = { source, directory: selection ? (exact ? false : source.directory ?? true) : true, entries, lazy };
   return withRevision ? attachRevision(tree, options) : tree;
+}
+
+export async function readGitEntry(source, repoPath, options = defaults) {
+  const tree = await readGitSource({ ...source, path: repoPath, directory: false }, options);
+  return tree.entries[0] ?? null;
 }
 
 export async function gitLayers(source, base = 'HEAD', options = defaults) {

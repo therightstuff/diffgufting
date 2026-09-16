@@ -114,8 +114,9 @@ test('independently selected immutable commits compare without re-resolving a li
   await session.selectCommit('left', session.source('left').generation, first);
   await session.selectCommit('right', session.source('right').generation, second);
 
-  assert.equal(session.current.left.entries[0].text, 'one');
-  assert.equal(session.current.right.entries[0].text, 'right');
+  const selected = await session.loadSelected('');
+  assert.equal(selected.left.text, 'one');
+  assert.equal(selected.right.text, 'right');
 });
 
 test('linked worktree observes index updates and unmerged stages stay read-only', async t => {

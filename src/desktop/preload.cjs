@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('diffgusting', {
   historyClose: id => invoke('history-close', id),
   sourceCommit: (side, generation, ref) => invoke('source-commit', side, generation, ref),
   read: file => invoke('read', file),
+  selectedEntry: pathname => invoke('selected-entry', pathname),
   save: request => invoke('save', request),
   saveAs: request => invoke('save-as', request),
   choose: directory => invoke('choose', directory),

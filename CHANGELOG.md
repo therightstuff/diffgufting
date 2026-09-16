@@ -1,5 +1,16 @@
 # Changelog
 
+## [optimize-comparison-engine] - 2026-09-16
+
+### Added
+
+- Added reusable performance, stress, and test-run reporting with durable timing artifacts.
+- Added progressive folder inventories, bounded comparison work, and incremental diff-result reuse.
+
+### Changed
+
+- Improved desktop comparison loading, progress, external-change reconciliation, and theme switching.
+
 ## [independent-source-selection] - 2026-09-15
 
 ### Added

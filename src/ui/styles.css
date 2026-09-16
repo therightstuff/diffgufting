@@ -12,3 +12,4 @@
 .cm-merge-a .cm-changedText,.cm-deletedChunk .cm-deletedText{background:var(--changed-removed)!important;background-image:none!important;text-decoration:none!important}.cm-merge-b .cm-changedText{background:var(--changed-added)!important;background-image:none!important;text-decoration:none!important}
 .merge-result,.merge-result>.pane,.merge-sources>.pane{min-height:0}
 .pane-title .name{display:flex}.path-directory{min-width:0;overflow:hidden;text-overflow:ellipsis}.file-name{flex:none}
+nav button.pending,[aria-disabled=true]{color:var(--muted);opacity:.65}nav button.directory{color:var(--accent)}.file-controls{display:flex;gap:6px;align-items:center}.file-controls #filter{margin:8px 0;min-width:0}.file-controls label{font-size:10px;color:var(--muted);gap:3px}.file-controls select{padding:5px}.more-files{text-align:center}

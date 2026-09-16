@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, mkdir, symlink, rm, readFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArguments } from '../src/core/arguments.mjs';
-import { readSource, compareTrees, readDisk, saveDisk } from '../src/host/files.mjs';
+import { readSource, readInventory, readInventorySource, verifyFileEquality, compareTrees, readDisk, saveDisk, mapBounded } from '../src/host/files.mjs';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-files-'));
@@ -75,4 +75,40 @@ test('source reading reports monotonic file progress before successful completio
   assert.equal(updates.at(-1).progress, 100);
   assert.ok(updates.some(update => update.progress > 0 && update.progress < 100));
   assert.ok(updates.every((update, index) => index === 0 || update.progress >= updates[index - 1].progress));
+});
+
+test('metadata inventory preserves empty directories without reading file content', async t => {
+  const dir = await fixture(t); const root = path.join(dir, 'root');
+  await mkdir(path.join(root, 'empty'), { recursive: true });
+  await writeFile(path.join(root, 'file'), 'contents');
+  const inventory = await readInventory(root);
+
+  assert.deepEqual(inventory.entries.map(entry => [entry.path, entry.kind]), [['empty', 'directory'], ['file', 'file']]);
+  assert.equal(inventory.entries.find(entry => entry.path === 'file').text, undefined);
+});
+
+test('bounded equality verification distinguishes changed equal-sized files', async t => {
+  const dir = await fixture(t); const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
+  await writeFile(left, 'aaaa'); await writeFile(right, 'bbbb');
+  assert.equal(await verifyFileEquality(left, right, 2), false);
+  await writeFile(right, 'aaaa');
+  assert.equal(await verifyFileEquality(left, right, 2), true);
+});
+
+test('inventory work honors configured concurrency and reports its batch size', async t => {
+  let running = 0; let maximum = 0;
+  const values = await mapBounded([1, 2, 3, 4], 2, async value => {
+    running++; maximum = Math.max(maximum, running);
+    await new Promise(resolve => setTimeout(resolve, 5)); running--;
+    return value * 2;
+  });
+  assert.deepEqual(values, [2, 4, 6, 8]); assert.equal(maximum, 2);
+  const dir = await fixture(t); const root = path.join(dir, 'root'); await mkdir(root); await writeFile(path.join(root, 'entry'), 'content');
+  assert.equal((await readInventory(root, { directoryConcurrency: 1, inventoryBatchSize: 7 })).batchSize, 7);
+});
+
+test('directory inventory source retains metadata without eager text content', async t => {
+  const dir = await fixture(t); const root = path.join(dir, 'root'); await mkdir(root); await writeFile(path.join(root, 'file'), 'contents');
+  const tree = await readInventorySource({ kind: 'file', path: root });
+  assert.equal(tree.entries[0].lazy, true); assert.equal(tree.entries[0].text, undefined); assert.match(tree.entries[0].fingerprint, /^metadata:/);
 });

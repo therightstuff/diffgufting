@@ -6,8 +6,8 @@ import { mapPosition } from '../core/navigation.mjs';
 export const fromNavigation = Annotation.define();
 
 export class Navigation {
-  constructor(entries, overview) {
-    this.entries = entries; this.overview = overview; this.expected = new WeakMap(); this.cache = new Map(); this.cleanup = [];
+  constructor(entries, overview, results = null) {
+    this.entries = entries; this.overview = overview; this.results = results; this.expected = new WeakMap(); this.cache = new Map(); this.cleanup = [];
     for (const { view } of entries) {
       const listener = () => {
         const expected = this.expected.get(view);
@@ -35,6 +35,9 @@ export class Navigation {
     this.refresh();
   }
   changes(before, after) {
+    if (this.results && before?.doc && after?.doc) return this.results.get(before.doc, after.doc).changes;
+    before = typeof before === 'string' ? before : before.view.state.doc.toString();
+    after = typeof after === 'string' ? after : after.view.state.doc.toString();
     let cache = this.cache.get(before);
     if (!cache) this.cache.set(before, cache = new Map());
     if (!cache.has(after)) cache.set(after, diff(before, after));
@@ -42,7 +45,7 @@ export class Navigation {
   }
   map(source, target, position) {
     const a = source.state.doc.toString(); const b = target.state.doc.toString();
-    return mapPosition(a, b, position, this.changes(a, b));
+    return mapPosition(a, b, position, this.changes(this.entries.find(entry => entry.view === source) ?? a, this.entries.find(entry => entry.view === target) ?? b));
   }
   selection(view, center = false) {
     if (this.busy || !this.entries.some(entry => entry.view === view)) return;
@@ -77,10 +80,10 @@ export class Navigation {
     this.cache.clear(); this.ranges = []; this.overview.replaceChildren();
     const canonical = this.entries[0]?.view;
     if (!canonical) return;
-    const before = canonical.state.doc.toString();
-    const others = this.entries.slice(1).map(entry => entry.view.state.doc.toString());
+    const canonicalEntry = this.entries[0]; const before = canonical.state.doc.toString();
+    const others = this.entries.slice(1);
     if (this.entries[0].original) others.push(this.entries[0].original.text);
-    for (const after of others) for (const change of this.changes(before, after)) this.ranges.push({ from: change.fromA, to: change.toA });
+    for (const after of others) for (const change of this.changes(canonicalEntry, after)) this.ranges.push({ from: change.fromA, to: change.toA });
     this.ranges.sort((a, b) => a.from - b.from);
     for (const range of this.ranges) {
       const marker = document.createElement('span'); marker.className = 'overview-change';

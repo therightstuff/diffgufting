@@ -43,6 +43,31 @@ test('comparison list retains edits, deduplicates pairs, and File Recent persist
   assert.equal(await entries.count(), 2); assert.match(await right.innerText(), /UNSAVED/);
 });
 
+test('folder inventory stays usable through tree/list selection, lazy loading, and source failure', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-folder-progressive-'));
+  const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
+  await Promise.all([mkdir(path.join(left, 'nested'), { recursive: true }), mkdir(path.join(right, 'nested'), { recursive: true })]);
+  await Promise.all([
+    writeFile(path.join(left, 'changed.txt'), 'left changed'), writeFile(path.join(right, 'changed.txt'), 'right changed'),
+    writeFile(path.join(left, 'nested', 'same.txt'), 'same'), writeFile(path.join(right, 'nested', 'same.txt'), 'same'),
+  ]);
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
+  const page = await app.firstWindow(); page.setDefaultTimeout(10000);
+  await page.evaluate(source => window.diffgusting.sourceLoad('left', source), { kind: 'file', path: left });
+  await page.getByRole('button', { name: /changed\.txt/ }).waitFor();
+  assert.match(await page.locator('#inventory-progress').innerText(), /compared|discovered/);
+  await page.evaluate(source => window.diffgusting.sourceLoad('right', source), { kind: 'file', path: right });
+  await page.getByRole('button', { name: /changed\.txt/ }).click();
+  await page.waitForFunction(() => document.querySelector('[data-side="left"] .cm-content')?.textContent.includes('left changed'));
+  await page.locator('#file-view').selectOption('tree');
+  await page.getByRole('button', { name: /nested/ }).click();
+  await page.getByRole('button', { name: /same\.txt/ }).waitFor();
+  const failure = await page.evaluate(source => window.diffgusting.sourceLoad('left', source), { kind: 'file', path: path.join(left, 'missing') });
+  assert.equal(failure.ok, false);
+  await page.getByRole('button', { name: /changed\.txt/ }).waitFor();
+});
+
 test('overview and cursor navigation synchronize all merge panes and both scroll axes', async t => {
   const lines = Array.from({ length: 250 }, (_, i) => `line ${i} ` + 'long '.repeat(80));
   const text = lines.join('\n');

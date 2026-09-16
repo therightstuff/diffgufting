@@ -5,6 +5,11 @@ export const defaults = Object.freeze({
   watchDebounceMs: 100,
   operationTimeoutMs: 30000,
   maxFileBytes: 32 * 1024 * 1024,
+  directoryConcurrency: 8,
+  inventoryBatchSize: 100,
+  comparisonQueueSize: 256,
+  comparisonCacheBytes: 32 * 1024 * 1024,
+  openComparisonLimit: 10,
   theme: 'dark',
   layout: 'side-by-side',
 });

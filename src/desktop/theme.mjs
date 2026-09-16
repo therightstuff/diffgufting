@@ -1,6 +1,8 @@
 export function applyTheme(nativeTheme, theme) {
   if (nativeTheme.themeSource !== theme) nativeTheme.themeSource = theme;
-  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  // Electron updates shouldUseDarkColors asynchronously after a forced theme
+  // change. The selected non-system preference is already authoritative.
+  return theme === 'system' ? nativeTheme.shouldUseDarkColors ? 'dark' : 'light' : theme;
 }
 
 export function subscribeToAppearance(nativeTheme, selectedTheme, publish) {

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Session } from './session.mjs';
+import { settings } from '../core/settings.mjs';
 
 function sourceIdentity(tree) {
   if (!tree) return null;
@@ -26,7 +27,7 @@ function sourceLabel(tree) {
 
 export class Workspaces {
   constructor(options = {}, emit = () => {}, onRecent = () => {}) {
-    this.options = options; this.emit = emit; this.onRecent = onRecent;
+    this.options = settings(options); this.emit = emit; this.onRecent = onRecent;
     this.records = new Map(); this.active = null; this.draft = null;
   }
   snapshot(record = this.active) {
@@ -35,8 +36,15 @@ export class Workspaces {
       sources: Object.fromEntries(['left', 'right'].map(side => [side, record.session.snapshot(record.session.source(side))])) };
   }
   list() { return [...this.records.values()].map(({ id, key, label }) => ({ id, key, label })); }
+  openCount() { return this.records.size + (this.draft && !this.records.has(this.draft.id) ? 1 : 0); }
+  ensureCapacity() {
+    if (this.openCount() >= this.options.openComparisonLimit) {
+      throw new Error(`Open comparison limit (${this.options.openComparisonLimit}) reached`);
+    }
+  }
   publish() { this.emit({ type: 'workspace', workspace: this.snapshot(), comparisons: this.list() }); }
   create(request = {}) {
+    this.ensureCapacity();
     const record = { id: randomUUID(), session: new Session(structuredClone(request), this.options) };
     record.session.subscribe(event => {
       if (event.type === 'comparison') {
@@ -126,6 +134,7 @@ export class Workspaces {
     return record.session;
   }
   read(file) { return this.owner(file).read(file); }
+  loadSelected(pathname) { if (!this.active) throw new Error('Comparison is not open'); return this.active.session.loadSelected(pathname); }
   async save(file, text, expected, format) {
     const owner = this.owner(file);
     const saved = await owner.save(file, text, expected, format);

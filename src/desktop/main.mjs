@@ -88,6 +88,7 @@ async function launch() {
   ipc('history-close', id => { histories.get(id)?.closeHistory(id); histories.delete(id); });
   ipc('source-commit', (side, generation, ref) => workspaces.selectCommit(side, generation, ref));
   ipc('read', file => workspaces.read(file));
+  ipc('selected-entry', pathname => workspaces.loadSelected(pathname));
   ipc('save', request => workspaces.save(request.path, request.text, request.fingerprint, request.format));
   ipc('save-as', async request => {
     const chosen = await dialog.showSaveDialog(window, { defaultPath: request.path });

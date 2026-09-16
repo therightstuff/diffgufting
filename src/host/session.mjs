@@ -3,9 +3,12 @@ import { watch } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Chunk } from '@codemirror/merge';
+import { Text } from '@codemirror/state';
 import { settings } from '../core/settings.mjs';
-import { readDisk, saveDisk } from './files.mjs';
-import { discoverRepository, openHistory, revisionLabels } from './git.mjs';
+import { readDisk, saveDisk, verifyFileEquality } from './files.mjs';
+import { discoverRepository, openHistory, readGitEntry, revisionLabels } from './git.mjs';
+import { ComparisonCache, cacheKey } from './comparison-cache.mjs';
 
 export class Session {
   constructor(request, options = {}) {
@@ -13,6 +16,7 @@ export class Session {
     this.options = settings(options);
     this.listeners = new Set(); this.documents = new Map(); this.writes = new Map(); this.aliases = new Map();
     this.watchers = []; this.generation = 0; this.historyGeneration = 0; this.closed = false;
+    this.cache = new ComparisonCache(this.options.comparisonCacheBytes);
     this.sources = Object.fromEntries(['left', 'right'].map(side => [side, {
       descriptor: request[side] ?? null, generation: 0, status: request[side] ? 'idle' : 'empty', progress: null, tree: null, error: null,
     }]));
@@ -23,7 +27,10 @@ export class Session {
     let canonical;
     try { canonical = await realpath(file); } catch (error) { if (error.code !== 'ENOENT') throw error; canonical = path.resolve(file); }
     this.aliases.set(path.resolve(file), canonical);
-    if (!this.documents.has(canonical)) this.documents.set(canonical, { state: await readDisk(canonical, this.options) });
+    if (!this.documents.has(canonical)) {
+      const state = await readDisk(canonical, this.options);
+      this.documents.set(canonical, { state, publishedFingerprint: state.fingerprint, publishedError: state.error });
+    }
     return canonical;
   }
   source(side) {
@@ -31,7 +38,7 @@ export class Session {
     return this.sources[side];
   }
   async authorize(tree) {
-    for (const entry of tree.entries) if (entry.absolute && entry.writable) entry.absolute = await this.allow(entry.absolute);
+    for (const entry of tree.entries) if (entry.absolute && entry.writable && !entry.lazy) entry.absolute = await this.allow(entry.absolute);
   }
   async load(side, descriptor) {
     if (this.closed) throw new Error('Session closed');
@@ -45,7 +52,10 @@ export class Session {
     source.worker = worker;
     try {
       const tree = await new Promise((resolve, reject) => {
-        source.cancel = () => reject(new Error('Source loading canceled'));
+        source.cancel = () => {
+          if (source.inventory) this.emit({ type: 'source-inventory', side, generation, inventory: { ...source.inventory, canceled: true, complete: true } });
+          reject(new Error('Source loading canceled'));
+        };
         worker.on('message', message => {
           if (message.type === 'progress') {
             if (source.generation !== generation) return;
@@ -55,6 +65,14 @@ export class Session {
             if (message.progress === 0 || message.progress === 100 || now - source.lastProgressEvent >= 100) {
               source.lastProgressEvent = now;
               this.emit({ type: 'source-progress', side, generation, progress: source.progress });
+            }
+          } else if (message.type === 'inventory') {
+            if (source.generation === generation) {
+              const entries = new Map((source.inventory?.entries ?? []).map(entry => [entry.path, entry]));
+              for (const entry of message.inventory.entries) entries.set(entry.path, entry);
+              source.inventory = { ...message.inventory, entries: [...entries.values()].sort((left, right) => left.path.localeCompare(right.path)) };
+              this.cache.set(cacheKey('inventory', 1, side, generation), source.inventory);
+              this.emit({ type: 'source-inventory', side, generation, inventory: source.inventory });
             }
           } else if (message.type === 'result') resolve(message.tree);
           else if (message.type === 'error') reject(new Error(message.error));
@@ -128,6 +146,9 @@ export class Session {
     if (this.closed) throw new Error('Session closed');
     const pair = [this.sources.left.generation, this.sources.right.generation];
     const generation = ++this.generation;
+    const resultKey = cacheKey('pair-result', 1, pair, this.request.base ?? null);
+    const cached = this.cache.get(resultKey);
+    if (cached) return this.acceptComparison(structuredClone(cached));
     if (this.worker) { this.cancelWorker?.(); await this.worker.terminate(); }
     const worker = new Worker(new URL('./comparison-worker.mjs', import.meta.url), { workerData: { request: this.request, left: this.sources.left.tree, right: this.sources.right.tree, options: this.options } });
     this.worker = worker;
@@ -138,6 +159,14 @@ export class Session {
       worker.once('exit', code => { if (code !== 0) reject(new Error(`Comparison worker exited with ${code}`)); });
     }).finally(() => { if (this.worker === worker) { this.worker = null; this.cancelWorker = null; } });
     if (this.closed || generation !== this.generation || pair.some((value, index) => value !== this.sources[['left', 'right'][index]].generation)) throw new Error('Comparison canceled');
+    this.cache.set(resultKey, result);
+    for (const row of result.rows) {
+      for (const side of ['left', 'right']) {
+        const entry = row[side];
+        if (entry?.fingerprint) this.cache.set(cacheKey('fingerprint', 1, side, entry.absolute ?? entry.path, entry.fingerprint), entry.fingerprint);
+      }
+      if (row.hunks) this.cache.set(cacheKey('hunks', 1, row.path, row.left?.fingerprint, row.right?.fingerprint), row.hunks);
+    }
     return this.acceptComparison(result);
   }
   async acceptComparison(result) {
@@ -172,6 +201,34 @@ export class Session {
     this.documents.get(file).state = state;
     return state;
   }
+  async loadSelected(pathname) {
+    if (this.closed || !this.current) throw new Error('Comparison is not available');
+    const row = this.current.rows.find(row => row.path === pathname);
+    if (!row) throw new Error('Selected file is no longer available');
+    const generations = Object.fromEntries(['left', 'right'].map(side => [side, this.source(side).generation]));
+    for (const side of ['left', 'right']) {
+      const entry = row[side]; const source = this.source(side);
+      if (source.descriptor?.kind === 'git' && entry?.repoPath) {
+        const loaded = await readGitEntry(source.descriptor, entry.repoPath, this.options);
+        if (source.generation !== generations[side] || this.closed) throw new Error('Selected file loading canceled');
+        Object.assign(entry, loaded, { lazy: false });
+        this.cache.set(cacheKey('selected-text', 1, side, pathname, entry.fingerprint), entry.text ?? '');
+        continue;
+      }
+      if (!entry?.absolute || source.descriptor?.kind !== 'file') continue;
+      const state = await readDisk(entry.absolute, this.options);
+      if (source.generation !== generations[side] || this.closed) throw new Error('Selected file loading canceled');
+      const absolute = entry.writable && !state.error ? await this.allow(entry.absolute) : entry.absolute;
+      Object.assign(entry, state, { absolute, writable: entry.writable && !state.error, lazy: false });
+      this.cache.set(cacheKey('selected-text', 1, side, pathname, state.fingerprint), state.text ?? '');
+    }
+    if (typeof row.left?.text === 'string' && typeof row.right?.text === 'string') {
+      row.hunks = Chunk.build(Text.of(row.left.text.split('\n')), Text.of(row.right.text.split('\n')), { timeout: this.options.operationTimeoutMs }).map(chunk => ({ fromA: chunk.fromA, toA: chunk.endA, fromB: chunk.fromB, toB: chunk.endB }));
+      this.cache.set(cacheKey('selected-hunks', 1, pathname, row.left.fingerprint, row.right.fingerprint), row.hunks);
+    }
+    this.emit({ type: 'selected-entry', path: pathname, row });
+    return row;
+  }
   async save(file, text, expected, format) {
     file = this.aliases.get(path.resolve(file)) ?? file;
     if (!this.documents.has(file)) throw new Error('Document is not open in this session');
@@ -179,12 +236,80 @@ export class Session {
     const previous = this.writes.get(file) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(async () => {
       const saved = await saveDisk(file, text, expected, format, this.options);
-      this.documents.get(file).state = saved;
+      const document = this.documents.get(file);
+      document.state = saved;
+      document.publishedFingerprint = saved.fingerprint;
+      document.publishedError = saved.error;
       return saved;
     });
     this.writes.set(file, next);
     try { return await next; }
     finally { if (this.writes.get(file) === next) this.writes.delete(file); }
+  }
+  invalidatePath(file) {
+    const target = path.resolve(file);
+    this.cache.deleteWhere(key => key.includes(target) || key.includes('pair-result'));
+  }
+  async reconcileEntry(pathname) {
+    const row = this.current?.rows.find(item => item.path === pathname);
+    if (!row) return false;
+    for (const side of ['left', 'right']) {
+      const sourceEntry = this.sources[side].tree?.entries.find(entry => entry.path === pathname);
+      row[side] = sourceEntry;
+    }
+    const { left, right } = row;
+    row.hunks = undefined;
+    if (left?.error || right?.error) row.status = 'unavailable';
+    else if (!left) row.status = 'added';
+    else if (!right) row.status = 'removed';
+    else if (left.kind !== right.kind) row.status = 'conflict';
+    else if (left.kind !== 'file') row.status = left.fingerprint === right.fingerprint ? 'equal' : 'changed';
+    else if (left.absolute && right.absolute) row.status = await verifyFileEquality(left.absolute, right.absolute).then(equal => equal ? 'equal' : 'changed').catch(() => 'unavailable');
+    else row.status = left.fingerprint === right.fingerprint ? 'equal' : 'changed';
+    this.cache.deleteWhere(key => key.includes(pathname) && (key.includes('selected') || key.includes('hunks') || key.includes('pair-result')));
+    this.emit({ type: 'comparison', result: this.current, scoped: true, path: pathname });
+    return true;
+  }
+  async reconcilePath(file, eventType = 'change') {
+    if (this.closed) return;
+    const target = path.resolve(file);
+    const affected = []; let topologyChanged = false; const paths = new Set();
+    for (const [side, source] of Object.entries(this.sources)) {
+      if (source.status !== 'ready' || source.descriptor?.kind !== 'file') continue;
+      const root = path.resolve(source.descriptor.path);
+      const rootInfo = await lstat(root).catch(() => null);
+      const contains = rootInfo?.isDirectory() ? target === root || target.startsWith(root + path.sep) : target === root;
+      if (!contains) continue;
+      const relative = rootInfo?.isDirectory() ? path.relative(root, target).split(path.sep).join('/') : '';
+      const entry = source.tree.entries.find(item => item.absolute && path.resolve(item.absolute) === target || item.path === relative);
+      if (!entry || rootInfo?.isDirectory() && target === root) {
+        await this.load(side, source.descriptor);
+        return;
+      }
+      const state = await readDisk(target, this.options);
+      if (state.missing) {
+        source.tree.entries.splice(source.tree.entries.indexOf(entry), 1);
+        affected.push(side); topologyChanged = true;
+        continue;
+      }
+      const canonical = this.aliases.get(target) ?? target;
+      Object.assign(entry, state, { path: entry.path, absolute: canonical, writable: !state.error });
+      const document = this.documents.get(canonical);
+      const changed = !document || document.publishedFingerprint !== state.fingerprint || document.publishedError !== state.error;
+      if (document) {
+        document.state = state;
+        document.publishedFingerprint = state.fingerprint;
+        document.publishedError = state.error;
+      }
+      if (changed) this.emit({ type: 'disk', path: canonical, state });
+      affected.push(side); paths.add(relative);
+    }
+    if (!affected.length) return;
+    this.invalidatePath(target);
+    this.emit({ type: 'source-invalidated', path: target, eventType, sides: affected });
+    if (this.sources.left.status !== 'ready' || this.sources.right.status !== 'ready') return;
+    if (topologyChanged) await this.calculate();
+    else for (const pathname of paths) await this.reconcileEntry(pathname);
   }
   async poll() {
     if (this.closed || this.polling) return;
@@ -193,8 +318,10 @@ export class Session {
       for (const [file, document] of this.documents) {
         if (this.writes.has(file)) continue;
         const state = await readDisk(file, this.options);
-        if (state.fingerprint !== document.state.fingerprint || state.error !== document.state.error) {
+        if (state.fingerprint !== document.publishedFingerprint || state.error !== document.publishedError) {
           document.state = state;
+          document.publishedFingerprint = state.fingerprint;
+          document.publishedError = state.error;
           this.emit({ type: 'disk', path: file, state });
         }
       }
@@ -206,9 +333,7 @@ export class Session {
           this.emit({ type: 'source-labels', side, generation: source.generation, labels });
         }
       }
-      if (this.calculateOnPoll !== false && !this.worker && this.sources.left.status === 'ready' && this.sources.right.status === 'ready') {
-        await this.calculate();
-      }
+      if (this.watchUnavailable && this.calculateOnPoll !== false && !this.worker) await this.refresh();
     } catch (error) { this.emit({ type: 'error', message: error.message }); }
     finally { this.polling = false; }
   }
@@ -222,13 +347,18 @@ export class Session {
     }
     for (const root of roots) {
       try {
-        const watcher = watch(root, { recursive: true }, () => {
+        const watcher = watch(root, { recursive: true }, (eventType, filename) => {
+          this.invalidatedPaths ??= new Map();
+          this.invalidatedPaths.set(filename ? path.join(root, filename) : root, eventType);
           clearTimeout(this.debounce);
-          this.debounce = setTimeout(() => this.poll(), this.options.watchDebounceMs);
+          this.debounce = setTimeout(() => {
+            const changes = [...(this.invalidatedPaths ?? new Map())]; this.invalidatedPaths?.clear();
+            Promise.all(changes.map(([changedPath, changedType]) => this.reconcilePath(changedPath, changedType))).catch(error => this.emit({ type: 'error', message: error.message }));
+          }, this.options.watchDebounceMs);
         });
-        watcher.on('error', error => this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }));
+        watcher.on('error', error => { this.watchUnavailable = true; this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }); });
         this.watchers.push(watcher);
-      } catch (error) { this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }); }
+      } catch (error) { this.watchUnavailable = true; this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }); }
     }
   }
   close() {
@@ -237,6 +367,7 @@ export class Session {
     this.cancelWorker?.(); this.worker?.terminate();
     for (const source of Object.values(this.sources)) { source.cancel?.(); source.worker?.terminate(); }
     for (const history of this.histories?.values() ?? []) history.close();
+    this.cache.clear();
     this.listeners.clear(); this.documents.clear();
   }
 }

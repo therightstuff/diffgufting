@@ -46,6 +46,7 @@ export class Document {
     this.historyTruncated = false;
     this.listeners = new Set();
     this.version = 0;
+    this.lastChange = null;
     this.writable = options.writable ?? true;
     this.selection = { anchor: 0, head: 0, scrollTop: 0 };
     this.activeGroup = null;
@@ -53,7 +54,7 @@ export class Document {
   get dirty() { return this.text !== this.disk.text; }
   get bytes() { return [...this.past, ...this.future].reduce((sum, entry) => sum + entry.bytes, 0); }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  emit() { this.version++; for (const listener of this.listeners) listener(this); }
+  emit(changeInfo = null) { this.version++; if (changeInfo) this.lastChange = { ...changeInfo, version: this.version }; for (const listener of this.listeners) listener(this); }
   setHistoryBudget(bytes) {
     if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error('History budget must be a positive integer');
     if ([...this.past, ...this.future].some(entry => entry.bytes > bytes)) throw new Error('History budget is smaller than a retained transition');
@@ -87,7 +88,7 @@ export class Document {
     }
     this.trim();
     this.text = text;
-    this.emit();
+    this.emit({ kind: next.kind, ranges: next.ranges, delta });
     return true;
   }
   undo() {
@@ -98,7 +99,7 @@ export class Document {
     const cursor = cursorFor(entry, true);
     this.selection = { ...this.selection, anchor: cursor, head: cursor };
     this.future.push(entry);
-    this.emit();
+    this.emit({ kind: 'undo', ranges: entry.ranges, changes: entry.changes });
     return true;
   }
   redo() {
@@ -109,10 +110,13 @@ export class Document {
     const cursor = cursorFor(entry, false);
     this.selection = { ...this.selection, anchor: cursor, head: cursor };
     this.past.push(entry);
-    this.emit();
+    this.emit({ kind: 'redo', ranges: entry.ranges, changes: entry.changes });
     return true;
   }
   observe(version) {
+    // Metadata-only inventory entries deliberately have no text yet. They are
+    // not an external document version until selected content is loaded.
+    if (version.text === undefined) return;
     const latest = this.pending.at(-1) ?? this.disk;
     if (version.fingerprint === latest.fingerprint && version.text === latest.text) return;
     if (!this.dirty && !this.pending.length && version.text !== null && !version.error) {
