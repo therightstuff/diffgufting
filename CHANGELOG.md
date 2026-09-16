@@ -1,5 +1,17 @@
 # Changelog
 
+## [comparison-workspace-navigation] - 2026-09-16
+
+### Added
+
+- Added persistent comparison workspaces and a recent-comparisons menu.
+- Added synchronized pane navigation and a document-wide change overview.
+
+### Changed
+
+- Clarified Git source selection and display of fixed revisions, aliases, and base-relative changes.
+- Improved editor source headers, application-icon integration, and changed-text readability.
+
 ## [optimize-comparison-engine] - 2026-09-16
 
 ### Added
