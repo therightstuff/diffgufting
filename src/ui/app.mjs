@@ -7,6 +7,7 @@ import { Document } from '../core/document.mjs';
 import { layerRanges } from '../core/change-layers.mjs';
 import { Navigation, fromNavigation } from './navigation.mjs';
 import { IncrementalDiffs } from '../core/incremental-diff.mjs';
+import { scopedChange } from '../core/scoped-update.mjs';
 
 const $ = selector => document.querySelector(selector);
 const host = window.diffgusting;
@@ -249,7 +250,10 @@ function syncDocuments() {
   syncing = true;
   try {
     for (const { doc, view, original } of views) {
-      if (view.state.doc.toString() !== doc.text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc.text }, annotations: fromModel.of(true), selection: { anchor: Math.min(doc.selection.anchor, doc.text.length), head: Math.min(doc.selection.head, doc.text.length) } });
+      if (view.state.doc.toString() !== doc.text) {
+        const changes = scopedChange(view.state.doc.toString(), doc.text, doc.lastChange?.delta) ?? { from: 0, to: view.state.doc.length, insert: doc.text };
+        view.dispatch({ changes, annotations: fromModel.of(true), selection: { anchor: Math.min(doc.selection.anchor, doc.text.length), head: Math.min(doc.selection.head, doc.text.length) } });
+      }
       if (original && getOriginalDoc(view.state).toString() !== original.text) {
         const length = getOriginalDoc(view.state).length;
         view.dispatch({ effects: originalDocChangeEffect(view.state, ChangeSet.of({ from: 0, to: length, insert: original.text }, length)) });

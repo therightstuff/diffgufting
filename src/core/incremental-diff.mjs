@@ -1,5 +1,5 @@
 import { ChangeSet } from '@codemirror/state';
-import { Chunk, diff } from '@codemirror/merge';
+import { Chunk } from '@codemirror/merge';
 import { Text } from '@codemirror/state';
 
 function text(value) { return Text.of(value.split('\n')); }
@@ -9,6 +9,10 @@ function changeSet(before, delta) {
 }
 
 function key(a, b) { return `${a.id}:${b.id}`; }
+
+function changesFromChunks(chunks) {
+  return chunks.flatMap(chunk => chunk.changes.map(change => change.offset(chunk.fromA, chunk.fromB)));
+}
 
 /**
  * Comparison-owned, versioned editor diff results. A known one-range local
@@ -31,7 +35,8 @@ export class IncrementalDiffs {
       chunks = Chunk.build(text(a.text), text(b.text));
       mode = 'fallback';
     }
-    const result = { a: { version: a.version, text: a.text }, b: { version: b.version, text: b.text }, chunks, changes: diff(a.text, b.text), mode, incremental: mode.startsWith('incremental'), precision: 'complete', complete: true };
+    const incremental = mode.startsWith('incremental');
+    const result = { a: { version: a.version, text: a.text }, b: { version: b.version, text: b.text }, chunks, changes: changesFromChunks(chunks), mode, incremental, calculations: { fullPairDiffs: incremental ? 0 : 1 }, precision: 'complete', complete: true };
     this.results.delete(id); this.results.set(id, result);
     while (this.results.size > this.limit) this.results.delete(this.results.keys().next().value);
     return result;

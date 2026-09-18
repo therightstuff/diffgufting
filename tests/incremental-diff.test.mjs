@@ -11,12 +11,14 @@ test('incremental diffs update chunks for known local edits and retain full-diff
   const next = results.get(left, right);
   assert.equal(next.incremental, true);
   assert.equal(next.mode, 'incremental-b'); assert.equal(next.precision, 'complete'); assert.equal(next.complete, true);
+  assert.equal(next.calculations.fullPairDiffs, 0, 'an incremental chunk update must not trigger a second complete pair diff');
   assert.deepEqual(next.changes, diff(left.text, right.text));
   assert.ok(next.chunks.length);
   right.undo();
   const undone = results.get(left, right);
   assert.equal(undone.incremental, false);
   assert.equal(undone.mode, 'full');
+  assert.equal(undone.calculations.fullPairDiffs, 1);
   assert.deepEqual(undone.changes, diff(left.text, right.text));
 });
 

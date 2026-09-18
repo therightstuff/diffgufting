@@ -49,6 +49,16 @@ A later wrapped run on the same machine family (run `24fd2732-d936-42e1-8e7c-a4a
 
 For this identified fixture and machine family, the recorded acceptance budgets are initial comparison ≤250 ms, at least one host heartbeat tick, and host RSS growth ≤128 MiB. They deliberately do not apply across different hardware, filesystem conditions, or fixture scales.
 
+## Editing responsiveness observation
+
+On 2026-09-18, an isolated copy of `cards-base/docs/spec.md` at revision `1fa8cefe08f79087c648e5966b0b64f2b9458a8c` was compared with the supplied working bytes without modifying the original repository. The historical SHA-256 was `94a7c277d96a9a5f5ee9233b055c5d20891c1d6f326d7f54303b99dfe097749d`; the working SHA-256 was `8c0a02027e5b35f8122632c88d19a901e70b05d26cc4d57dae2c8811424c74af`. The isolated Git worktree recorded four added and four removed lines for the file.
+
+On macOS arm64 with Node 25.9.0 and Electron 44.3.0, five end-of-file keystrokes in the plain-file control recorded baseline input-to-paint samples of 238.2, 222.9, 143.0, 106.3, and 107.3 ms; convergence samples were 258.0, 249.6, 166.2, 132.7, and 133.0 ms. The candidate recorded input-to-paint samples of 31.5, 16.5, 16.4, 19.4, and 16.5 ms; convergence samples were 55.4, 49.4, 49.4, 49.4, and 49.4 ms. The baseline median/tail budgets for this machine and fixture are therefore 143.0/238.2 ms for input-to-paint and 166.2/258.0 ms for convergence.
+
+The Git-source launch initially requested the repository root rather than `docs/spec.md`, so its full-tree inventory did not create a window within 30 seconds. Retrying with `--left-path docs/spec.md --right-path docs/spec.md` measured baseline input-to-paint samples of 172.9, 155.5, 157.9, 152.6, and 154.8 ms, with convergence samples of 196.6, 182.8, 182.9, 182.8, and 182.4 ms. The Git-backed candidate recorded input-to-paint samples of 36.7, 16.8, 18.9, 17.6, and 18.5 ms, with convergence samples of 70.7, 49.2, 49.5, 52.0, and 46.3 ms. This reproduces the Git-layer scenario; renderer long-task counters remain unavailable in the current harness.
+
+The candidate is below every recorded Git-source baseline sample. The serial desktop workspace/editor suite also exercised repeated comparison activation, layout switching, dirty close protection, and final-view cleanup without accumulating comparison entries or leaving an owned application process. Its wrapped run was `89111335-fc9e-44b9-99f6-ade4709e809b`.
+
 ## Remaining platform checks
 
 Native Windows and Linux runtime smoke checks are unavailable on this macOS host. macOS Intel packaging is complete, but native Intel runtime validation is also outstanding. Before release, run the editor and host suites on those target systems and verify the native launcher, detached/wait lifecycle, file watching, save/review flow, and operating-system icon appearance.

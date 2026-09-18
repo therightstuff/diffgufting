@@ -1,5 +1,11 @@
 # Changelog
 
+## [consistent-editing-responsiveness] - 2026-09-18
+
+### Changed
+
+- Improved Git-backed editor responsiveness by reusing versioned comparison results across decorations, navigation, and secondary views while retaining correctness fallbacks.
+
 ## [comparison-creation-and-navigation] - 2026-09-18
 
 ### Added

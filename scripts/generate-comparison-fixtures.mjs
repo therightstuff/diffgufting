@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
 
 export async function generateFixture({ root, seed = 1, scale = 30 }) {
   if (typeof root !== 'string' || !root) throw new Error('Fixture root is required');
@@ -28,6 +32,31 @@ export async function generateFixture({ root, seed = 1, scale = 30 }) {
   const manifestPath = path.join(root, 'manifest.json');
   await writeFile(manifestPath, JSON.stringify({ version: 1, seed, scale, entries, textCases }, null, 2));
   return { left, right, manifestPath };
+}
+
+export async function generateEditingFixture({ root }) {
+  if (typeof root !== 'string' || !root) throw new Error('Fixture root is required');
+  const before = 'same\nsame\nשלום\nmultiline\n';
+  const after = 'same\nchanged\nשלום עולם\nmultiline\ninserted\n';
+  const repository = path.join(root, 'git');
+  const gitHistorical = path.join(repository, 'spec.txt');
+  const gitSnapshot = path.join(root, 'git-historical.txt');
+  const plain = path.join(root, 'plain');
+  const plainHistorical = path.join(plain, 'historical.txt');
+  const plainWorking = path.join(plain, 'working.txt');
+  await mkdir(plain, { recursive: true });
+  await mkdir(repository, { recursive: true });
+  await writeFile(gitHistorical, before);
+  await run('git', ['init', '--quiet'], { cwd: repository });
+  await run('git', ['config', 'user.name', 'Diffgusting fixture'], { cwd: repository });
+  await run('git', ['config', 'user.email', 'fixture@example.invalid'], { cwd: repository });
+  await run('git', ['add', 'spec.txt'], { cwd: repository });
+  await run('git', ['commit', '--quiet', '-m', 'baseline'], { cwd: repository });
+  await writeFile(gitHistorical, after);
+  await writeFile(gitSnapshot, before);
+  await writeFile(plainHistorical, before);
+  await writeFile(plainWorking, after);
+  return { git: { repository, historical: gitSnapshot, working: gitHistorical }, plain: { historical: plainHistorical, working: plainWorking } };
 }
 
 async function main() {
