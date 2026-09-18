@@ -7,7 +7,7 @@ import { enumerateWithOpendir, enumerateWithReaddir } from '../scripts/benchmark
 import { runBenchmark } from '../scripts/run-comparison-benchmark.mjs';
 
 test('directory enumeration candidates return the same sorted wide and deep fixture paths', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-enumeration-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-enumeration-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'deep', 'nested'), { recursive: true });
   await Promise.all(['a', 'b', 'deep/nested/c'].map(file => writeFile(path.join(root, file), file)));

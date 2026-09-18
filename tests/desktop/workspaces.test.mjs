@@ -7,10 +7,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 async function fixture(t, contents, extra = []) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-workspace-ui-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-workspace-ui-'));
   const files = {};
   for (const [name, text] of Object.entries(contents)) { files[name] = path.join(dir, name + '.txt'); await writeFile(files[name], text); }
-  const app = await electron.launch({ timeout: 30000, args: ['.', files.left, files.right, ...extra.map(value => files[value] ?? value)], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', files.left, files.right, ...extra.map(value => files[value] ?? value)], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -21,8 +21,8 @@ async function fixture(t, contents, extra = []) {
 }
 
 test('launching without sources shows New and does not register a comparison', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-new-page-'));
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-new-page-'));
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   await page.locator('#open-comparison').waitFor();
@@ -38,20 +38,20 @@ test('application menu opens an accessible About dialog from package metadata', 
   const about = await app.evaluate(({ app, Menu }) => {
     const find = menu => {
       for (const item of menu?.items ?? []) {
-        if (item.label === 'About diffgusting') return item;
+        if (item.label === 'About diffgufting') return item;
         const child = find(item.submenu);
         if (child) return child;
       }
     };
     return { name: app.getName(), hasItem: Boolean(find(Menu.getApplicationMenu())) };
   });
-  assert.equal(about.name, 'diffgusting');
-  assert.ok(about.hasItem, 'Expected an About diffgusting menu item');
+  assert.equal(about.name, 'diffgufting');
+  assert.ok(about.hasItem, 'Expected an About diffgufting menu item');
   await page.getByRole('button', { name: 'Preferences', exact: true }).focus();
   await app.evaluate(({ Menu }) => {
     const find = menu => {
       for (const item of menu?.items ?? []) {
-        if (item.label === 'About diffgusting') return item;
+        if (item.label === 'About diffgufting') return item;
         const child = find(item.submenu);
         if (child) return child;
       }
@@ -61,7 +61,7 @@ test('application menu opens an accessible About dialog from package metadata', 
   const dialog = page.locator('#about-dialog');
   await dialog.waitFor({ state: 'visible' });
   await dialog.getByRole('heading', { name: metadata.name }).waitFor();
-  assert.equal(await dialog.getByRole('img', { name: 'Diffgusting pixel-art face logo' }).evaluate(image => image.naturalWidth > 0), true);
+  assert.equal(await dialog.getByRole('img', { name: 'Diffgufting pixel-art face logo' }).evaluate(image => image.naturalWidth > 0), true);
   assert.match(await dialog.innerText(), new RegExp(metadata.version));
   assert.match(await dialog.innerText(), new RegExp(metadata.description));
   assert.equal(await dialog.getByRole('link', { name: 'Repository', exact: true }).getAttribute('href'), metadata.repository.url);
@@ -81,15 +81,15 @@ test('comparison list retains edits, deduplicates pairs, and File Recent persist
   assert.equal(await entries.count(), 1);
   const right = page.locator('[data-side="right"] .cm-content'); await right.focus(); await page.keyboard.type('EDIT ');
   await page.getByRole('button', { name: 'New…', exact: true }).click();
-  await page.evaluate(file => window.diffgusting.sourceLoad('left', { kind: 'file', path: file }), files.left);
-  await page.evaluate(file => window.diffgusting.sourceLoad('right', { kind: 'file', path: file }), files.other);
+  await page.evaluate(file => window.diffgufting.sourceLoad('left', { kind: 'file', path: file }), files.left);
+  await page.evaluate(file => window.diffgufting.sourceLoad('right', { kind: 'file', path: file }), files.other);
   await page.getByRole('button', { name: 'Open comparison', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.comparison-item').length === 2);
   await entries.first().locator('button').first().click();
   await page.waitForFunction(() => document.querySelector('[data-side="right"] .cm-content')?.textContent.includes('EDIT'));
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   assert.equal(await right.innerText(), 'right');
-  const opened = await page.evaluate(request => window.diffgusting.open(request), { left: { kind: 'file', path: files.left }, right: { kind: 'file', path: files.right } });
+  const opened = await page.evaluate(request => window.diffgufting.open(request), { left: { kind: 'file', path: files.left }, right: { kind: 'file', path: files.right } });
   assert.equal(opened.ok, true); assert.equal(await entries.count(), 2);
   const recent = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find(item => item.label === 'File').submenu.items.find(item => item.label === 'Recent').submenu.items.map(item => item.label));
   assert.equal(recent.length, 2); assert.match(recent[0], /right.txt/);
@@ -103,27 +103,27 @@ test('comparison list retains edits, deduplicates pairs, and File Recent persist
 });
 
 test('folder inventory stays usable through tree/list selection, lazy loading, and source failure', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-folder-progressive-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-folder-progressive-'));
   const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
   await Promise.all([mkdir(path.join(left, 'nested'), { recursive: true }), mkdir(path.join(right, 'nested'), { recursive: true })]);
   await Promise.all([
     writeFile(path.join(left, 'changed.txt'), 'left changed'), writeFile(path.join(right, 'changed.txt'), 'right changed'),
     writeFile(path.join(left, 'nested', 'same.txt'), 'same'), writeFile(path.join(right, 'nested', 'same.txt'), 'same'),
   ]);
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   await page.getByRole('radio', { name: 'Folder', exact: true }).check();
-  await page.evaluate(source => window.diffgusting.sourceLoad('left', source), { kind: 'file', path: left });
+  await page.evaluate(source => window.diffgufting.sourceLoad('left', source), { kind: 'file', path: left });
   await page.getByRole('button', { name: /changed\.txt/ }).waitFor();
   assert.match(await page.locator('#inventory-progress').innerText(), /compared|discovered/);
-  await page.evaluate(source => window.diffgusting.sourceLoad('right', source), { kind: 'file', path: right });
+  await page.evaluate(source => window.diffgufting.sourceLoad('right', source), { kind: 'file', path: right });
   await page.getByRole('button', { name: /changed\.txt/ }).click();
   await page.waitForFunction(() => document.querySelector('[data-side="left"] .cm-content')?.textContent.includes('left changed'));
   await page.locator('#file-view').selectOption('tree');
   await page.getByRole('button', { name: /nested/ }).click();
   await page.getByRole('button', { name: /same\.txt/ }).waitFor();
-  const failure = await page.evaluate(source => window.diffgusting.sourceLoad('left', source), { kind: 'file', path: path.join(left, 'missing') });
+  const failure = await page.evaluate(source => window.diffgufting.sourceLoad('left', source), { kind: 'file', path: path.join(left, 'missing') });
   assert.equal(failure.ok, false);
   await page.getByRole('button', { name: /changed\.txt/ }).waitFor();
 });
@@ -170,12 +170,12 @@ test('changed text uses backgrounds and identical documents have an empty overvi
 });
 
 test('Git discovery exposes an inline working-version control without a prompt', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-git-identity-ui-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-git-identity-ui-'));
   const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   git('init', '--quiet'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   const file = path.join(dir, 'file.txt'); await writeFile(file, 'base'); git('add', '.'); git('commit', '--quiet', '-m', 'base'); git('tag', '-a', 'release', '-m', 'release'); git('branch', 'alias');
   const base = git('rev-parse', 'HEAD'); await writeFile(file, 'working');
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   await page.locator('#right-source').fill(file); await page.locator('#right-source').press('Enter');
@@ -193,18 +193,18 @@ test('Git discovery exposes an inline working-version control without a prompt',
   await editor.focus(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('base');
   await page.waitForFunction(() => document.querySelector('.base-dirty')?.textContent === '');
   git('add', 'file.txt'); git('commit', '--quiet', '-m', 'saved edit'); git('tag', '-f', 'release');
-  await page.evaluate(() => window.diffgusting.refresh());
+  await page.evaluate(() => window.diffgufting.refresh());
   await page.waitForFunction(() => document.querySelector('.revision-name')?.textContent !== 'release');
   assert.match(await page.locator('.revision-name').getAttribute('title'), new RegExp(base));
 });
 
 test('File Recent survives restart, reports unavailable paths, and protects an edited lone source', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-recent-restart-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-recent-restart-'));
   const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
   await writeFile(left, 'left'); await writeFile(right, 'right');
   let app;
   t.after(async () => { if (app) await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
-  const launch = args => electron.launch({ timeout: 30000, args: ['.', ...args], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const launch = args => electron.launch({ timeout: 30000, args: ['.', ...args], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   app = await launch([left, right]);
   let page = await app.firstWindow(); await page.locator('.comparison-item').waitFor();
   await app.evaluate(({ app }) => app.exit(0)); app = null;
@@ -230,7 +230,7 @@ test('File Recent survives restart, reports unavailable paths, and protects an e
   await page.locator('#close-discard').click();
   assert.equal(await page.locator('[data-side="right"] .cm-content').innerText(), 'right');
   assert.equal(await readFile(draft, 'utf8'), 'draft');
-  await page.evaluate(file => window.diffgusting.sourceLoad('right', { kind: 'file', path: file }), draft);
+  await page.evaluate(file => window.diffgufting.sourceLoad('right', { kind: 'file', path: file }), draft);
   await page.waitForFunction(() => document.querySelectorAll('.comparison-item').length === 1 && document.querySelector('[data-side="right"] .cm-content')?.textContent === 'draft');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await page.waitForEvent('close');
@@ -238,11 +238,11 @@ test('File Recent survives restart, reports unavailable paths, and protects an e
 });
 
 test('browsing and editing child files retains one folder comparison', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-folder-workspace-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-folder-workspace-'));
   const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
   await mkdir(left); await mkdir(right);
   for (const folder of [left, right]) for (const name of ['one', 'two']) await writeFile(path.join(folder, name), name);
-  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   for (const name of ['one', 'two', 'one']) {
@@ -313,14 +313,14 @@ test('New retains an edited preview without a close prompt and submits only a re
 });
 
 for (const submitted of [false, true]) test(`inline revisions retain grouped edits and titles ${submitted ? 'after' : 'before'} submission`, async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-grouped-revisions-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-grouped-revisions-'));
   const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   git('init', '--quiet'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
   await writeFile(left, 'first'); await writeFile(right, 'right'); git('add', '.'); git('commit', '--quiet', '-m', 'first');
   const first = git('rev-parse', 'HEAD'); git('tag', '-a', 'release', '-m', 'release'); git('branch', 'old-branch');
   await writeFile(left, 'second'); git('add', '.'); git('commit', '--quiet', '-m', 'second');
-  const app = await electron.launch({ timeout: 30000, args: submitted ? ['.', left, right] : ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: submitted ? ['.', left, right] : ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   if (!submitted) {
@@ -366,11 +366,11 @@ for (const submitted of [false, true]) test(`inline revisions retain grouped edi
 });
 
 test('large folder windows preserve anchors and keep comparison scrolling independent', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-windowed-folders-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-windowed-folders-'));
   const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
   await mkdir(left); await mkdir(right);
   await Promise.all(Array.from({ length: 1100 }, (_, index) => writeFile(path.join(left, `file-${String(index).padStart(4, '0')}.txt`), String(index))));
-  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   await page.locator('#files button').first().waitFor();
@@ -406,7 +406,7 @@ test('large folder windows preserve anchors and keep comparison scrolling indepe
   assert.ok(await page.locator('#file-region').evaluate(node => node.clientHeight) > height);
   await page.locator('#toggle-comparisons').click(); assert.equal(await page.locator('#documents button').first().innerText(), 'New…');
   for (let index = 0; index < 9; index++) {
-    const result = await page.evaluate(request => window.diffgusting.open(request), { left: { kind: 'file', path: path.join(left, `file-${String(index).padStart(4, '0')}.txt`) }, right: { kind: 'file', path: path.join(left, 'file-1099.txt') } });
+    const result = await page.evaluate(request => window.diffgufting.open(request), { left: { kind: 'file', path: path.join(left, `file-${String(index).padStart(4, '0')}.txt`) }, right: { kind: 'file', path: path.join(left, 'file-1099.txt') } });
     assert.equal(result.ok, true, result.error);
   }
   assert.ok(await page.locator('#documents').evaluate(node => node.scrollHeight > node.clientHeight));
@@ -458,10 +458,10 @@ test('New hides retained edits and file path changes use one group slot with res
 });
 
 for (const submitted of [false, true]) test(`New preserves an edited folder pair ${submitted ? 'after' : 'before'} explicit submission`, async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-new-folder-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-new-folder-'));
   const folders = ['left', 'right', 'other'].map(name => path.join(dir, name));
   for (const folder of folders) { await mkdir(folder); await writeFile(path.join(folder, 'child.txt'), path.basename(folder)); }
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   await page.waitForFunction(() => document.documentElement.dataset.ready === 'true');
@@ -512,10 +512,10 @@ for (const submitted of [false, true]) test(`New preserves an edited folder pair
 });
 
 test('folder roots remain editable and Browse keeps replacements in one slot', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-folder-group-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-folder-group-'));
   const folders = ['left', 'right', 'other'].map(name => path.join(dir, name));
   for (const folder of folders) { await mkdir(folder); await writeFile(path.join(folder, 'child.txt'), path.basename(folder)); }
-  const app = await electron.launch({ timeout: 30000, args: ['.', folders[0], folders[1]], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', folders[0], folders[1]], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
   const right = page.locator('[data-side="right"] .cm-content'); await right.focus(); await page.keyboard.type('EDIT ');

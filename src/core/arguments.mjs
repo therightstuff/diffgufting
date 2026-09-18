@@ -1,4 +1,4 @@
-export const usage = `Usage: diffgusting LEFT RIGHT [--wait]
+export const usage = `Usage: diffgufting LEFT RIGHT [--wait]
   --left PATH | --left-repo REPO --left-ref REV [--left-path PATH]
   --right PATH | --right-repo REPO --right-ref REV [--right-path PATH]
   --base PATH | --base-repo REPO --base-ref REV [--base-path PATH]

@@ -34,7 +34,7 @@ For working-tree Git sources, capture HEAD as the base when selected; keep that 
 
 Replace `window.confirm` with an accessible Yes/No dialog using the existing host boundary where native integration is needed. Explain that Yes opens the commit picker and No loads or keeps the current working version from disk. Dismissal follows No and stale prompts cannot replace a newer selection.
 
-Use `assets/branding/diffgusting-icon.png` and its existing platform derivatives for runtime and packaged identity. Inspect launch behavior on each supported platform, including macOS development Dock identity, before deciding which runtime icon hook is needed. A correct window icon setting alone is insufficient evidence of correct OS identity.
+Use `assets/branding/diffgufting-icon.png` and its existing platform derivatives for runtime and packaged identity. Inspect launch behavior on each supported platform, including macOS development Dock identity, before deciding which runtime icon hook is needed. A correct window icon setting alone is insufficient evidence of correct OS identity.
 
 ### One navigation coordinator per active comparison
 

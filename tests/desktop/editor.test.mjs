@@ -8,10 +8,10 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 test('editor groups typing, isolates Enter, and restores the caret through undo', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-batched-undo-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-batched-undo-'));
   const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
   await writeFile(left, 'left'); await writeFile(right, '');
-  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_TEST: '1', DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUFTING_TEST: '1', DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow(); const editor = page.locator('[data-side="right"] .cm-content');
   await editor.waitFor(); const empty = await editor.innerText(); await editor.click(); await page.keyboard.type('ab');
@@ -29,10 +29,10 @@ test('editor groups typing, isolates Enter, and restores the caret through undo'
 });
 
 test('desktop edits, reviews disjoint external changes, and preserves undo across layouts', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-desktop-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-desktop-'));
   const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
   await writeFile(left, 'left\nsecond\n'); await writeFile(right, 'right\nsecond\n');
-  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_TEST: '1', DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUFTING_TEST: '1', DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   await page.locator('[data-side="right"] .cm-content').waitFor();
@@ -64,10 +64,10 @@ test('desktop edits, reviews disjoint external changes, and preserves undo acros
 });
 
 test('three-way output supports merge choices, save, undo, and close cancellation', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-merge-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-merge-'));
   const files = Object.fromEntries(['left', 'right', 'base', 'result'].map(name => [name, path.join(dir, `${name}.txt`)]));
   for (const [name, text] of [['left', 'left\n'], ['right', 'right\n'], ['base', 'base\n']]) await writeFile(files[name], text);
-  const app = await electron.launch({ timeout: 30000, args: ['.', files.left, files.right, '--base', files.base, '--output', files.result], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', files.left, files.right, '--base', files.base, '--output', files.result], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   await page.locator('[data-side="result"] .cm-content').waitFor();
@@ -88,7 +88,7 @@ test('three-way output supports merge choices, save, undo, and close cancellatio
 });
 
 test('Git categories coexist in the gutter and canceled changes remain inspectable', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-git-ui-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-git-ui-'));
   const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   git('init', '--quiet'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   const file = path.join(dir, 'file.txt');
@@ -96,7 +96,7 @@ test('Git categories coexist in the gutter and canceled changes remain inspectab
   const base = git('rev-parse', 'HEAD');
   await writeFile(file, 'committed\n'); git('add', '.'); git('commit', '--quiet', '-m', 'next');
   await writeFile(file, 'staged\n'); git('add', '.'); await writeFile(file, 'committed\n');
-  const app = await electron.launch({ timeout: 30000, args: ['.', '--left-repo', dir, '--left-ref', 'HEAD', '--right-repo', dir, '--right-ref', '@worktree', '--git-base', base], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', '--left-repo', dir, '--left-ref', 'HEAD', '--right-repo', dir, '--right-ref', '@worktree', '--git-base', base], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   for (const category of ['committed', 'staged', 'unstaged']) await page.locator(`.category-markers .${category}`).first().waitFor();
@@ -110,13 +110,13 @@ test('Git categories coexist in the gutter and canceled changes remain inspectab
 });
 
 test('commit picker closes without selection and replaces the invoking source with a snapshot', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-history-picker-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-history-picker-'));
   const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   git('init', '--quiet'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   const left = path.join(dir, 'left.txt'); const right = path.join(dir, 'right.txt');
   await writeFile(left, 'first\n'); await writeFile(right, 'right\n'); git('add', '.'); git('commit', '--quiet', '-m', 'first');
   await writeFile(left, 'second\n'); git('add', 'left.txt'); git('commit', '--quiet', '-m', 'second');
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   await page.locator('#left-source').fill(left); await page.locator('#left-source').press('Enter');
@@ -150,8 +150,8 @@ test('commit picker closes without selection and replaces the invoking source wi
 });
 
 test('renderer runs with an in-browser host adapter and no Electron preload', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-browser-'));
-  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-browser-'));
+  const app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   await app.firstWindow();
   const windowEvent = app.waitForEvent('window');
@@ -160,7 +160,7 @@ test('renderer runs with an in-browser host adapter and no Electron preload', as
   await page.addInitScript(() => {
     const entry = (text, absolute) => ({ path: '', text, absolute, writable: true, fingerprint: text });
     const left = entry('before\n', '/before'); const right = entry('after\n', '/after');
-    window.diffgusting = {
+    window.diffgufting = {
       bootstrap: async () => ({ ok: true, value: { preferences: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side' }, appearance: 'dark', comparison: { left: { source: { kind: 'file' }, entries: [left] }, right: { source: { kind: 'file' }, entries: [right] }, rows: [{ path: '', left, right, status: 'changed' }], layers: [] } } }),
       preferences: async value => ({ ok: true, value: { preferences: { historyBytes: 104857600, theme: 'dark', layout: 'side-by-side', ...value }, appearance: value.theme === 'light' ? 'light' : 'dark' } }),
       dirty: () => {}, onEvent: () => () => {},
@@ -177,11 +177,11 @@ test('renderer runs with an in-browser host adapter and no Electron preload', as
 });
 
 test('layout switches retain the logical scroll position and selection', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-layout-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-layout-'));
   const left = path.join(dir, 'left'); const right = path.join(dir, 'right');
   const text = Array.from({ length: 1000 }, (_, i) => `line ${i}`).join('\n');
   await writeFile(left, text); await writeFile(right, text);
-  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  const app = await electron.launch({ timeout: 30000, args: ['.', left, right], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   t.after(async () => { await app.evaluate(({ app }) => app.exit(0)); await rm(dir, { recursive: true, force: true }); });
   const page = await app.firstWindow();
   const editor = page.locator('[data-side="right"] .cm-content'); await editor.waitFor(); await editor.focus();

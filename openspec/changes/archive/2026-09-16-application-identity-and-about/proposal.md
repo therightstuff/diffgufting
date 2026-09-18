@@ -6,7 +6,7 @@ Development launches can expose Electron branding in the app menu, and About lac
 
 ## What Changes
 
-- Name the application menu diffgusting.
+- Name the application menu diffgufting.
 - Populate About from package metadata and the existing application logo.
 - Add repository and support URLs to package metadata and expose clickable links in About.
 - Support development and packaged launch paths.

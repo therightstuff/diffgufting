@@ -26,7 +26,7 @@ test('source identity captures fixed base text and peeled branch/tag aliases', a
 
 function git(repo, ...args) { return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim(); }
 async function repo(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-git-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-git-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   git(dir, 'init', '--quiet'); git(dir, 'config', 'user.name', 'Test'); git(dir, 'config', 'user.email', 'test@example.invalid');
   return dir;

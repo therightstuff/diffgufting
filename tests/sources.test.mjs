@@ -7,7 +7,7 @@ import { parseArguments } from '../src/core/arguments.mjs';
 import { readSource, readInventory, readInventorySource, verifyFileEquality, compareTrees, readDisk, saveDisk, mapBounded } from '../src/host/files.mjs';
 
 async function fixture(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-files-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-files-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }

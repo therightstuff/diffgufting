@@ -2,11 +2,11 @@
 
 ## Context
 
-Desktop startup uses the default Electron appMenu role and sets an icon, but has no explicit application name or package-driven About implementation. package.json supplies name, version, and description; origin identifies https://github.com/therightstuff/diffgusting.
+Desktop startup uses the default Electron appMenu role and sets an icon, but has no explicit application name or package-driven About implementation. package.json supplies name, version, and description; origin identifies https://github.com/therightstuff/diffgufting.
 
 ## Goals / Non-Goals
 
-Goals: diffgusting menu identity and About with existing logo, package information, repository, and support links in development and packaged builds.
+Goals: diffgufting menu identity and About with existing logo, package information, repository, and support links in development and packaged builds.
 
 Non-goals: new artwork, update checking, donations inside the application, or changing editor workflows.
 
@@ -14,11 +14,11 @@ Non-goals: new artwork, update checking, donations inside the application, or ch
 
 ### Keep metadata in package.json
 
-Use name, version, and description from package.json. Add repository metadata for https://github.com/therightstuff/diffgusting and funding metadata pointing to https://industrialcuriosity.com/shop. Derive runtime display information from these fields, including the existing logo asset. Do not duplicate version or links in renderer markup.
+Use name, version, and description from package.json. Add repository metadata for https://github.com/therightstuff/diffgufting and funding metadata pointing to https://industrialcuriosity.com/shop. Derive runtime display information from these fields, including the existing logo asset. Do not duplicate version or links in renderer markup.
 
 ### Set identity during desktop initialization
 
-Set application identity early enough to affect menu construction and development startup. Audit userData path behavior before changing the runtime name; preserve existing preferences and recent comparisons if the name changes the default storage location. Packaged identity and the visible menu must agree, with the requested menu text diffgusting.
+Set application identity early enough to affect menu construction and development startup. Audit userData path behavior before changing the runtime name; preserve existing preferences and recent comparisons if the name changes the default storage location. Packaged identity and the visible menu must agree, with the requested menu text diffgufting.
 
 ### Provide an application-owned About dialog
 

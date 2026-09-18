@@ -8,7 +8,7 @@ Define portable desktop presentation, visual identity, and state-preserving layo
 
 ### Requirement: Runtime application icon identity
 
-Development and packaged launches SHALL use `assets/branding/diffgusting-icon.png` or its platform derivatives for operating-system application identity, including applicable Dock, taskbar, application switcher, and launcher surfaces. The icon SHALL preserve the master artwork's proportions and complete silhouette.
+Development and packaged launches SHALL use `assets/branding/diffgufting-icon.png` or its platform derivatives for operating-system application identity, including applicable Dock, taskbar, application switcher, and launcher surfaces. The icon SHALL preserve the master artwork's proportions and complete silhouette.
 
 #### Scenario: Launch the application
 
@@ -45,7 +45,7 @@ Changed character ranges SHALL use a stronger background than the surrounding ch
 
 ### Requirement: Human-face pixel-art identity
 
-The project SHALL use `assets/branding/diffgusting-logo.png` as its logo master and `assets/branding/diffgusting-icon.png` as its application icon master. Branding SHALL retain the supplied human face, shaggy black hair, floppy black ears, mismatched red and green eyes, tan beard, crooked teeth, and turquoise collar in pixel art.
+The project SHALL use `assets/branding/diffgufting-logo.png` as its logo master and `assets/branding/diffgufting-icon.png` as its application icon master. Branding SHALL retain the supplied human face, shaggy black hair, floppy black ears, mismatched red and green eyes, tan beard, crooked teeth, and turquoise collar in pixel art.
 
 #### Scenario: Display project branding
 

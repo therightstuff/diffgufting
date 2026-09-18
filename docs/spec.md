@@ -1,6 +1,6 @@
 # Architecture
 
-Diffgusting separates document state from presentation. Shared models live in `src/core/`, host filesystem and Git adapters in `src/host/`, the Electron bridge in `src/desktop/`, and the portable renderer in `src/ui/`. The CLI belongs in `bin/` and build/distribution entry points in `scripts/`.
+Diffgufting separates document state from presentation. Shared models live in `src/core/`, host filesystem and Git adapters in `src/host/`, the Electron bridge in `src/desktop/`, and the portable renderer in `src/ui/`. The CLI belongs in `bin/` and build/distribution entry points in `scripts/`.
 
 `scripts/test-runner.mjs` owns the common test execution contract. It streams child diagnostics to unique ignored artifacts, writes atomic terminal and compact status JSON records, and retains bounded compatible successful-run timing history. Package test commands invoke it before Node's test runner, including serialized desktop execution.
 

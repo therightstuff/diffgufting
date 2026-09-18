@@ -48,7 +48,7 @@ export async function generateEditingFixture({ root }) {
   await mkdir(repository, { recursive: true });
   await writeFile(gitHistorical, before);
   await run('git', ['init', '--quiet'], { cwd: repository });
-  await run('git', ['config', 'user.name', 'Diffgusting fixture'], { cwd: repository });
+  await run('git', ['config', 'user.name', 'Diffgufting fixture'], { cwd: repository });
   await run('git', ['config', 'user.email', 'fixture@example.invalid'], { cwd: repository });
   await run('git', ['add', 'spec.txt'], { cwd: repository });
   await run('git', ['commit', '--quiet', '-m', 'baseline'], { cwd: repository });

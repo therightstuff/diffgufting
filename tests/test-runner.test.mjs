@@ -32,7 +32,7 @@ function start(command, args) {
 }
 
 test('test wrapper stores noisy child output and returns a bounded summary', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', "console.log('noisy output '.repeat(2000))",
@@ -46,7 +46,7 @@ test('test wrapper stores noisy child output and returns a bounded summary', asy
 });
 
 test('test wrapper writes a terminal report with outcome and elapsed time', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', "console.error('failure detail'); process.exit(3)",
@@ -64,7 +64,7 @@ test('test wrapper writes a terminal report with outcome and elapsed time', asyn
 });
 
 test('test wrapper records Node test counts without printing test output', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', "console.log('ℹ pass 1\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0')",
@@ -76,7 +76,7 @@ test('test wrapper records Node test counts without printing test output', async
 });
 
 test('test wrapper returns compact status without replaying diagnostics', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const completed = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', "console.error('private diagnostic');",
@@ -94,7 +94,7 @@ test('test wrapper returns compact status without replaying diagnostics', async 
 });
 
 test('test wrapper records compatible timing history for later status queries', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const command = [process.execPath, '-e', ''];
   await run(process.execPath, ['scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', ...command]);
@@ -106,7 +106,7 @@ test('test wrapper records compatible timing history for later status queries', 
 });
 
 test('test wrapper exposes running status before its child completes', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const running = start(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', 'setTimeout(() => {}, 200)',
@@ -126,7 +126,7 @@ test('test wrapper exposes running status before its child completes', async t =
 });
 
 test('test wrapper exposes child output only when verbose mode is selected', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--verbose', '--', process.execPath, '-e', "console.log('selected diagnostic')",
@@ -137,7 +137,7 @@ test('test wrapper exposes child output only when verbose mode is selected', asy
 });
 
 test('test wrapper returns scoped failure diagnostics from run artifacts', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const failed = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', "console.error('selected failure'); process.exit(1)",
@@ -150,7 +150,7 @@ test('test wrapper returns scoped failure diagnostics from run artifacts', async
 });
 
 test('test wrapper writes a failed report when the child cannot be spawned', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', 'definitely-not-a-command',
@@ -164,7 +164,7 @@ test('test wrapper writes a failed report when the child cannot be spawned', asy
 });
 
 test('test wrapper records timed-out children', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const result = await run(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--timeout-ms', '20', '--', process.execPath, '-e', 'setTimeout(() => {}, 500)',
@@ -177,7 +177,7 @@ test('test wrapper records timed-out children', async t => {
 });
 
 test('test wrapper records cancellation and preserves its terminal report', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const running = start(process.execPath, [
     'scripts/test-runner.mjs', '--artifact-dir', artifacts, '--', process.execPath, '-e', 'setTimeout(() => {}, 500)',
@@ -194,7 +194,7 @@ test('test wrapper records cancellation and preserves its terminal report', asyn
 });
 
 test('test wrapper reports missing and corrupt status artifacts without replaying logs', async t => {
-  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgusting-test-runner-'));
+  const artifacts = await mkdtemp(path.join(tmpdir(), 'diffgufting-test-runner-'));
   t.after(() => rm(artifacts, { recursive: true, force: true }));
   const missing = await run(process.execPath, ['scripts/test-runner.mjs', '--artifact-dir', artifacts, '--status', 'missing']);
   assert.equal(missing.code, 1);

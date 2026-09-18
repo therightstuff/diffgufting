@@ -3,7 +3,7 @@
 ## 1. Metadata and desktop identity
 
 - [x] 1.1 Add repository and support metadata to package.json using the verified GitHub URL and supplied shop URL; synchronize lockfile metadata where applicable.
-- [x] 1.2 Initialize diffgusting application/menu identity for development and packaged launches while preserving native menu actions.
+- [x] 1.2 Initialize diffgufting application/menu identity for development and packaged launches while preserving native menu actions.
 - [x] 1.3 Verify runtime-name effects on userData and preserve existing preferences and recent comparisons if storage resolution changes.
 
 ## 2. About presentation

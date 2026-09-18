@@ -7,7 +7,7 @@ import path from 'node:path';
 import { Workspaces, comparisonKey, groupKey, recentComparisons } from '../src/host/workspaces.mjs';
 
 async function creationFixture(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-creation-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-creation-'));
   const workspaces = new Workspaces();
   t.after(async () => { workspaces.close(); await rm(dir, { recursive: true, force: true }); });
   const left = { kind: 'file', path: path.join(dir, 'left') }; const right = { kind: 'file', path: path.join(dir, 'right') };
@@ -241,7 +241,7 @@ test('recent comparisons retain ten unique descriptors and move activation to th
 });
 
 test('drafts load independently and only register on explicit submission', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-workspaces-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-workspaces-'));
   const workspaces = new Workspaces();
   t.after(async () => { workspaces.close(); await rm(dir, { recursive: true, force: true }); });
   const files = ['a', 'b', 'c'].map(name => path.join(dir, name));
@@ -259,13 +259,13 @@ test('drafts load independently and only register on explicit submission', async
   await workspaces.open({ left: source(files[0]), right: source(files[1]) });
   assert.equal(workspaces.active.id, first);
   assert.equal(workspaces.records.size, 2);
-  await assert.rejects(workspaces.open({ left: source('/missing/diffgusting'), right: source(files[1]) }), /ENOENT/);
+  await assert.rejects(workspaces.open({ left: source('/missing/diffgufting'), right: source(files[1]) }), /ENOENT/);
   assert.equal(workspaces.active.id, first);
   assert.equal((await workspaces.read(files[2])).text, '2');
 });
 
 test('draft submission creates one folder comparison and retains explicit revision pairs', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-workspace-revisions-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-workspace-revisions-'));
   let recent;
   const workspaces = new Workspaces({}, () => {}, entry => { recent = entry; });
   t.after(async () => { workspaces.close(); await rm(dir, { recursive: true, force: true }); });
@@ -299,7 +299,7 @@ test('draft submission creates one folder comparison and retains explicit revisi
 });
 
 test('workspaces enforce the configured aggregate open-comparison limit', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-workspace-limit-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-workspace-limit-'));
   const workspaces = new Workspaces({ openComparisonLimit: 1 });
   t.after(async () => { workspaces.close(); await rm(dir, { recursive: true, force: true }); });
   const files = ['a', 'b', 'c'].map(name => path.join(dir, name));

@@ -4,7 +4,7 @@
 
 ### Requirement: Runtime application icon identity
 
-Development and packaged launches SHALL use `assets/branding/diffgusting-icon.png` or its platform derivatives for operating-system application identity, including applicable Dock, taskbar, application switcher, and launcher surfaces. The icon SHALL preserve the master artwork's proportions and complete silhouette.
+Development and packaged launches SHALL use `assets/branding/diffgufting-icon.png` or its platform derivatives for operating-system application identity, including applicable Dock, taskbar, application switcher, and launcher surfaces. The icon SHALL preserve the master artwork's proportions and complete silhouette.
 
 #### Scenario: Launch the application
 

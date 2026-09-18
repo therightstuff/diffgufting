@@ -7,12 +7,12 @@ import path from 'node:path';
 import { mapBounded } from '../../src/host/files.mjs';
 
 test('10,000-file discovery keeps the host and renderer responsive and sends each inventory entry once', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-discovery-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-discovery-'));
   const folder = path.join(dir, 'files'); await mkdir(folder);
   let app;
   t.after(async () => { try { if (app) await app.evaluate(({ app }) => app.exit(0)); } finally { await rm(dir, { recursive: true, force: true }); } });
   await mapBounded(Array.from({ length: 10000 }, (_, index) => index), 32, index => writeFile(path.join(folder, `file-${String(index).padStart(5, '0')}.txt`), String(index)));
-  app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUSTING_SETTINGS_DIR: dir } });
+  app = await electron.launch({ timeout: 30000, args: ['.'], env: { ...process.env, DIFFGUFTING_SETTINGS_DIR: dir } });
   const page = await app.firstWindow(); page.setDefaultTimeout(15000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => document.documentElement.dataset.ready === 'true');
@@ -25,7 +25,7 @@ test('10,000-file discovery keeps the host and renderer responsive and sends eac
     const stats = window.discoveryStats = { active: true, last: performance.now(), maxGap: 0, frames: 0, transferred: 0, maxBatch: 0 };
     const frame = now => { stats.maxGap = Math.max(stats.maxGap, now - stats.last); stats.last = now; stats.frames++; if (stats.active) requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
-    window.stopDiscoveryEvents = window.diffgusting.onEvent(event => {
+    window.stopDiscoveryEvents = window.diffgufting.onEvent(event => {
       if (event.type === 'source-inventory') { stats.transferred += event.inventory.entries.length; stats.maxBatch = Math.max(stats.maxBatch, event.inventory.entries.length); }
     });
   });
@@ -44,7 +44,7 @@ test('10,000-file discovery keeps the host and renderer responsive and sends eac
   await page.getByRole('button', { name: /file-09999/ }).click();
   await page.waitForFunction(() => document.querySelector('[data-side="left"] .cm-content')?.textContent === '9999');
   await page.evaluate(() => {
-    const stop = window.diffgusting.onEvent(event => {
+    const stop = window.diffgufting.onEvent(event => {
       if (event.type === 'source' && event.side === 'left' && event.source.status === 'loading') {
         stop(); document.querySelector('.new-comparison').click();
       }

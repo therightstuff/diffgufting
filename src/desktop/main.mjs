@@ -10,7 +10,7 @@ import { applyTheme, subscribeToAppearance } from './theme.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 let application;
 let window; let workspaces; let pendingClose = false; let rendererReady = false; let dirty = false; let preferences = settings(); let appearance = 'dark'; let stopAppearanceUpdates; let initial; let initialComparison;
-const send = value => { if (window && !window.isDestroyed()) window.webContents.send('diffgusting:event', value); };
+const send = value => { if (window && !window.isDestroyed()) window.webContents.send('diffgufting:event', value); };
 function preferenceState() { return { preferences, appearance }; }
 function publishAppearance(next) {
   appearance = next;
@@ -18,7 +18,7 @@ function publishAppearance(next) {
 }
 function authorize(event) { if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Untrusted application frame'); }
 function ipc(name, action) {
-  ipcMain.handle(`diffgusting:${name}`, async (event, ...args) => {
+  ipcMain.handle(`diffgufting:${name}`, async (event, ...args) => {
     authorize(event);
     try { return { ok: true, value: await action(...args) }; }
     catch (error) { return { ok: false, error: error.message, external: error.external }; }
@@ -36,11 +36,11 @@ async function launch() {
   const argv = rawArgs.filter((arg, index) => (separator >= 0 && index >= separator) || !/^--(?:inspect(?:-brk)?|remote-debugging-port)=/.test(arg));
   initial = argv.length ? parseArguments(argv) : null;
   await app.whenReady();
-  const settingsDir = process.env.DIFFGUSTING_SETTINGS_DIR ?? app.getPath('userData');
+  const settingsDir = process.env.DIFFGUFTING_SETTINGS_DIR ?? app.getPath('userData');
   const packageInfo = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  application = Object.freeze({ name: packageInfo.name, version: packageInfo.version, description: packageInfo.description, logo: '../assets/branding/diffgusting-logo.png', repository: packageInfo.repository.url, support: packageInfo.funding.url });
+  application = Object.freeze({ name: packageInfo.name, version: packageInfo.version, description: packageInfo.description, logo: '../assets/branding/diffgufting-logo.png', repository: packageInfo.repository.url, support: packageInfo.funding.url });
   app.setName(application.name);
-  app.dock?.setIcon(path.join(root, 'assets/branding/diffgusting-icon.png'));
+  app.dock?.setIcon(path.join(root, 'assets/branding/diffgufting-icon.png'));
   const settingsFile = path.join(settingsDir, 'settings.json');
   const recentFile = path.join(settingsDir, 'recent-comparisons.json');
   let recent = []; let recentWrite = Promise.resolve();
@@ -59,7 +59,7 @@ async function launch() {
   workspaces.options = preferences;
   appearance = applyTheme(nativeTheme, preferences.theme);
   stopAppearanceUpdates = subscribeToAppearance(nativeTheme, () => preferences.theme, publishAppearance);
-  window = new BrowserWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 600, title: application.name, show: false, backgroundColor: appearance === 'dark' ? '#171a21' : '#f5f4f0', icon: path.join(root, 'assets/branding/diffgusting-icon.png'), webPreferences: { preload: path.join(root, 'src/desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 600, title: application.name, show: false, backgroundColor: appearance === 'dark' ? '#171a21' : '#f5f4f0', icon: path.join(root, 'assets/branding/diffgufting-icon.png'), webPreferences: { preload: path.join(root, 'src/desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   const eventMenu = (label, command, accelerator) => ({ label, accelerator, click: () => send({ type: 'command', command }) });
@@ -129,8 +129,8 @@ async function launch() {
     await mkdir(settingsDir, { recursive: true }); await writeFile(settingsFile, JSON.stringify(preferences, null, 2));
     return preferenceState();
   });
-  ipcMain.on('diffgusting:dirty', (event, value) => { authorize(event); dirty = !!value; window.setDocumentEdited(dirty); });
-  ipcMain.on('diffgusting:close-approved', event => { authorize(event); pendingClose = true; window.close(); });
+  ipcMain.on('diffgufting:dirty', (event, value) => { authorize(event); dirty = !!value; window.setDocumentEdited(dirty); });
+  ipcMain.on('diffgufting:close-approved', event => { authorize(event); pendingClose = true; window.close(); });
   // Ask the renderer for current state: its latest edit notification can still be in flight.
   window.webContents.on('render-process-gone', () => { rendererReady = false; });
   window.on('close', event => { if (!pendingClose && rendererReady) { event.preventDefault(); send({ type: 'close-request' }); } });

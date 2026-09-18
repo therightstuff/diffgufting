@@ -55,7 +55,7 @@
 ## 7. Distribution and acceptance
 
 - [x] 7.1 Package the desktop app and CLI for the supported Windows, macOS, and Linux targets with actionable installation and startup diagnostics.
-- [x] 7.6 Derive required platform icon containers and resolutions from assets/branding/diffgusting-icon.png, preserving pixel edges, transparency where supported, and proportions; inspect at 16, 32, 48, and 256 pixels and verify embedded Windows resources, both macOS bundle icons, and the Linux registration resource/script. Native Windows/Linux appearance remains part of 7.2.
+- [x] 7.6 Derive required platform icon containers and resolutions from assets/branding/diffgufting-icon.png, preserving pixel edges, transparency where supported, and proportions; inspect at 16, 32, 48, and 256 pixels and verify embedded Windows resources, both macOS bundle icons, and the Linux registration resource/script. Native Windows/Linux appearance remains part of 7.2.
 - [ ] 7.2 Run platform smoke checks for CLI launch, terminal closure, wait behavior, editing/saving, merge, watching/atomic replacement, contention review, undo, and Git layer refresh; record evidence and any unavailable platform checks. macOS arm64 checks passed; native Windows, Linux, and macOS Intel runtime checks remain unavailable on this host. See docs/verification.md.
 - [x] 7.3 Measure packaged size, large-directory responsiveness, cancellation, and multi-document history consumption; resolve failures against the documented behavior.
 - [x] 7.4 Run the focused automated acceptance suite and dependency audit; confirm no Git mutation commands or persistent history were introduced.

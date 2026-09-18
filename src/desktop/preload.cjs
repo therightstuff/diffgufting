@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const invoke = (name, ...args) => ipcRenderer.invoke(`diffgusting:${name}`, ...args);
-contextBridge.exposeInMainWorld('diffgusting', {
+const invoke = (name, ...args) => ipcRenderer.invoke(`diffgufting:${name}`, ...args);
+contextBridge.exposeInMainWorld('diffgufting', {
   bootstrap: () => invoke('bootstrap'),
   aboutLink: link => invoke('about-link', link),
   open: request => invoke('open', request),
@@ -26,11 +26,11 @@ contextBridge.exposeInMainWorld('diffgusting', {
   choose: directory => invoke('choose', directory),
   refresh: () => invoke('refresh'),
   preferences: value => invoke('preferences', value),
-  dirty: value => ipcRenderer.send('diffgusting:dirty', value),
-  closeApproved: () => ipcRenderer.send('diffgusting:close-approved'),
+  dirty: value => ipcRenderer.send('diffgufting:dirty', value),
+  closeApproved: () => ipcRenderer.send('diffgufting:close-approved'),
   onEvent: callback => {
     const listener = (_event, value) => callback(value);
-    ipcRenderer.on('diffgusting:event', listener);
-    return () => ipcRenderer.removeListener('diffgusting:event', listener);
+    ipcRenderer.on('diffgufting:event', listener);
+    return () => ipcRenderer.removeListener('diffgufting:event', listener);
   },
 });

@@ -4,7 +4,7 @@
 
 ### Requirement: Human-face pixel-art identity
 
-The project SHALL use `assets/branding/diffgusting-logo.png` as its logo master and `assets/branding/diffgusting-icon.png` as its application icon master. Branding SHALL retain the supplied human face, shaggy black hair, floppy black ears, mismatched red and green eyes, tan beard, crooked teeth, and turquoise collar in pixel art.
+The project SHALL use `assets/branding/diffgufting-logo.png` as its logo master and `assets/branding/diffgufting-icon.png` as its application icon master. Branding SHALL retain the supplied human face, shaggy black hair, floppy black ears, mismatched red and green eyes, tan beard, crooked teeth, and turquoise collar in pixel art.
 
 #### Scenario: Display project branding
 

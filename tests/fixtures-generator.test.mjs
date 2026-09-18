@@ -6,7 +6,7 @@ import path from 'node:path';
 import { generateEditingFixture, generateFixture } from '../scripts/generate-comparison-fixtures.mjs';
 
 test('fixture generator creates deterministic versioned folder manifests', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-fixture-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-fixture-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const fixture = await generateFixture({ root, seed: 7, scale: 3 });
   const manifest = JSON.parse(await readFile(fixture.manifestPath, 'utf8'));
@@ -19,7 +19,7 @@ test('fixture generator creates deterministic versioned folder manifests', async
 });
 
 test('editing fixture supplies equivalent Git-backed and plain-file controls without source contents', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-editing-fixture-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-editing-fixture-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const fixture = await generateEditingFixture({ root });

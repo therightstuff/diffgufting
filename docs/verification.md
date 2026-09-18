@@ -29,7 +29,7 @@ No dependency versions changed. Existing non-arm64 distributions predate this ch
 
 ## Crash diagnostic check
 
-`Electron-2026-09-15-201545.ips` records Electron 44.3.0 terminating with `EXC_BREAKPOINT` / `SIGTRAP` on the `CrBrowserMain` thread. Its recorded coalition and responsible process are Visual Studio Code, and the anonymized application path does not establish that the incident came from Diffgusting. It is therefore evidence of an Electron crash, not evidence that the reported folder-comparison failure has an identified cause.
+`Electron-2026-09-15-201545.ips` records Electron 44.3.0 terminating with `EXC_BREAKPOINT` / `SIGTRAP` on the `CrBrowserMain` thread. Its recorded coalition and responsible process are Visual Studio Code, and the anonymized application path does not establish that the incident came from Diffgufting. It is therefore evidence of an Electron crash, not evidence that the reported folder-comparison failure has an identified cause.
 
 An isolated 500-pair folder comparison ran through the shared wrapper on 2026-09-15 without a crash or timeout (run `42c1b625-8a07-4d66-8783-3e5b627fea2f`). This bounded run does not reproduce the original failure.
 
@@ -67,4 +67,4 @@ Use [testing](testing.md) for commands and [setup](setup.md) for packaging. Do n
 
 ## Application identity and About
 
-On macOS Apple Silicon, the desktop and packaged-app checks verified the `diffgusting` application menu name, package-derived About version and description, logo resolution, keyboard dismissal with focus restoration, and the repository and support destinations. Settings and recent comparisons continue to use the resolved user-data directory captured before runtime naming is changed. Native Windows and Linux checks remain unavailable on this host.
+On macOS Apple Silicon, the desktop and packaged-app checks verified the `diffgufting` application menu name, package-derived About version and description, logo resolution, keyboard dismissal with focus restoration, and the repository and support destinations. Settings and recent comparisons continue to use the resolved user-data directory captured before runtime naming is changed. Native Windows and Linux checks remain unavailable on this host.

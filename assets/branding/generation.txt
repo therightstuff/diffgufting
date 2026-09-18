@@ -1,6 +1,6 @@
 Current branding uses the user-supplied legally-human.jpeg replacement.
 The original photograph-based branding is superseded and is not used in application or distribution assets.
-Built-in image_gen extracted the large left head for diffgusting-logo.png and the small right head for diffgusting-icon.png on 2026-09-14.
+Built-in image_gen extracted the large left head for diffgufting-logo.png and the small right head for diffgufting-icon.png on 2026-09-14.
 Both PNG masters have alpha channels. scripts/export-icons.mjs derives platform sizes and containers with nearest-neighbor resizing.
 
 Logo prompt:

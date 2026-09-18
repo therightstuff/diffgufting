@@ -21,7 +21,7 @@
 
 ### Added
 
-- Added consistent diffgusting application identity and an accessible, package-driven About dialog for development and packaged desktop launches.
+- Added consistent diffgufting application identity and an accessible, package-driven About dialog for development and packaged desktop launches.
 - Added repository and author-support links to About, opening in the system browser without navigating the editor.
 
 ### Changed

@@ -7,7 +7,7 @@ import { Session } from '../src/host/session.mjs';
 import { cacheKey } from '../src/host/comparison-cache.mjs';
 
 test('session watches atomic replacements and rejects writes outside selected documents', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-session-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-session-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await writeFile(left, 'a'); await writeFile(right, 'b');
@@ -29,7 +29,7 @@ test('session watches atomic replacements and rejects writes outside selected do
 });
 
 test('watching publishes each successive external version of an authorized file', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-successive-watch-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-successive-watch-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await Promise.all([writeFile(left, 'left'), writeFile(right, 'before')]);
@@ -45,7 +45,7 @@ test('watching publishes each successive external version of an authorized file'
 });
 
 test('new comparison cancels stale worker and closing session rejects outstanding work', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-cancel-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-cancel-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await writeFile(left, 'one'); await writeFile(right, 'two');
@@ -57,7 +57,7 @@ test('new comparison cancels stale worker and closing session rejects outstandin
 });
 
 test('a source loads independently, authorizes its file, and reports its side state', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-single-source-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-single-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); await writeFile(left, 'only left');
   const session = new Session({}, { reconcileMs: 40, watchDebounceMs: 10 });
@@ -76,7 +76,7 @@ test('a source loads independently, authorizes its file, and reports its side st
 });
 
 test('folder loading publishes metadata inventory before content completion', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-inventory-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-inventory-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'file'), 'contents');
   const session = new Session({}); t.after(() => session.close());
@@ -87,7 +87,7 @@ test('folder loading publishes metadata inventory before content completion', as
 });
 
 test('folder inventory is delivered in configured bounded batches', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-inventory-batches-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-inventory-batches-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await Promise.all(['a', 'b', 'c'].map(name => writeFile(path.join(root, name), name)));
   const session = new Session({}, { inventoryBatchSize: 2 }); t.after(() => session.close());
@@ -103,7 +103,7 @@ test('folder inventory is delivered in configured bounded batches', async t => {
 });
 
 test('replacing a folder during inventory delivery cancels its remaining batches', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-inventory-cancel-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-inventory-cancel-'));
   const replacement = path.join(root, 'replacement'); await mkdir(replacement);
   await writeFile(path.join(replacement, 'current'), 'current');
   await Promise.all(Array.from({ length: 100 }, (_, index) => writeFile(path.join(root, String(index)), 'old')));
@@ -126,7 +126,7 @@ test('replacing a folder during inventory delivery cancels its remaining batches
 });
 
 test('comparison cache eviction never releases an authorized dirty document', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-cache-document-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-cache-document-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await Promise.all([writeFile(left, 'left'), writeFile(right, 'right')]);
@@ -141,7 +141,7 @@ test('comparison cache eviction never releases an authorized dirty document', as
 });
 
 test('ready compatible sources compare automatically while incompatible sources stay ready', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-source-pair-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-source-pair-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right'); const folder = path.join(root, 'folder');
   await writeFile(left, 'before'); await writeFile(right, 'after'); await mkdir(folder);
@@ -158,7 +158,7 @@ test('ready compatible sources compare automatically while incompatible sources 
 });
 
 test('scoped reconciliation refreshes an externally changed entry without reloading its source', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-scoped-reconcile-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-scoped-reconcile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await mkdir(left); await mkdir(right);
@@ -182,7 +182,7 @@ test('scoped reconciliation refreshes an externally changed entry without reload
 });
 
 test('reconciliation updates topology for added, deleted, renamed, and atomically replaced entries', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-topology-reconcile-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-topology-reconcile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await mkdir(left); await mkdir(right);
@@ -203,7 +203,7 @@ test('reconciliation updates topology for added, deleted, renamed, and atomicall
 });
 
 test('root reconciliation covers watchers without filenames and falls back to periodic refresh after watcher failure', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-root-reconcile-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-root-reconcile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await Promise.all([writeFile(left, 'before'), writeFile(right, 'before')]);
@@ -220,7 +220,7 @@ test('root reconciliation covers watchers without filenames and falls back to pe
 });
 
 test('selected-entry loading returns authorized current text and hunks', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-selected-entry-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-selected-entry-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right');
   await Promise.all([writeFile(left, 'left'), writeFile(right, 'right changed')]);
@@ -232,7 +232,7 @@ test('selected-entry loading returns authorized current text and hunks', async t
 });
 
 test('selected lazy work does not materialize unrelated folder entry text', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-lazy-isolation-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-lazy-isolation-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const left = path.join(root, 'left'); const right = path.join(root, 'right'); await Promise.all([mkdir(left), mkdir(right)]);
   await Promise.all([writeFile(path.join(left, 'chosen'), 'left'), writeFile(path.join(right, 'chosen'), 'right'), writeFile(path.join(left, 'other'), 'same'), writeFile(path.join(right, 'other'), 'same')]);

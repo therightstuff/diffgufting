@@ -7,7 +7,7 @@ import { Session } from '../src/host/session.mjs';
 import { Document } from '../src/core/document.mjs';
 
 test('directory comparison leaves the host responsive and document history stays bounded', async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'diffgusting-performance-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'diffgufting-performance-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const a = path.join(dir, 'a'); const b = path.join(dir, 'b'); await mkdir(a); await mkdir(b);
   const count = 500;

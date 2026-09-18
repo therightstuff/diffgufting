@@ -5,7 +5,7 @@ import { generateFixture } from './generate-comparison-fixtures.mjs';
 import { Session } from '../src/host/session.mjs';
 
 export async function captureBaseline({ scale = 30 } = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-baseline-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgufting-baseline-'));
   const fixture = await generateFixture({ root, scale });
   const session = new Session({ left: { kind: 'file', path: fixture.left }, right: { kind: 'file', path: fixture.right } });
   let ticks = 0; const heartbeat = setInterval(() => ticks++, 5);

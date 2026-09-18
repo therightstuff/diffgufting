@@ -172,7 +172,7 @@ export async function saveDisk(file, text, expected, format = {}, options = defa
   const raw = text.replaceAll('\n', format.newline ?? '\n');
   const bytes = Buffer.from((format.bom ? '\uFEFF' : '') + raw);
   if (bytes.length > options.maxFileBytes) throw new Error('Save exceeds configured file size limit');
-  const temp = path.join(path.dirname(file), `.${path.basename(file)}.diffgusting-${randomUUID()}`);
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.diffgufting-${randomUUID()}`);
   let handle;
   try {
     handle = await open(temp, 'wx', before.mode ?? 0o600);

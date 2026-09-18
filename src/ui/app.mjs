@@ -10,7 +10,7 @@ import { IncrementalDiffs } from '../core/incremental-diff.mjs';
 import { scopedChange } from '../core/scoped-update.mjs';
 
 const $ = selector => document.querySelector(selector);
-const host = window.diffgusting;
+const host = window.diffgufting;
 const fromModel = Annotation.define();
 const documents = new Map();
 const views = [];
@@ -280,7 +280,7 @@ function stashWorkspace() {
     positions: new Map(views.map(({ doc }) => [doc.id, { ...doc.selection }])), sources: { ...sourceState }, inventories: { ...inventories }, fileScroll: $('#file-region').scrollTop, filter: $('#filter').value, fileView: $('#file-view').value, expanded: [...expandedDirectories] });
 }
 function showEmptyWorkspace() {
-  const empty = element('div', undefined, 'empty'); const icon = element('img'); icon.src = '../assets/branding/diffgusting-icon.png'; icon.alt = '';
+  const empty = element('div', undefined, 'empty'); const icon = element('img'); icon.src = '../assets/branding/diffgufting-icon.png'; icon.alt = '';
   empty.append(icon, element('h1', 'Every change has a story.'), element('p', 'Choose two files or folders to compare, edit, and merge.'));
   $('#content').replaceChildren(empty);
 }

@@ -8,7 +8,7 @@ Install pinned dependencies with `npm ci`, build with `npm run build`, and launc
 
 Run `npm run icons`, `npm run build`, and then `npm run package -- darwin arm64` to assemble a native app directory and ZIP in `release/`. The packaging script also accepts `darwin x64`, `win32 x64`, and `linux x64`. Cross-platform packaging does not replace testing on those operating systems. The packaging host requires a `zip` executable. The selected packager edits Windows executable resources directly and does not require Wine.
 
-Extract the ZIP into its final location and run its `diffgusting` launcher (`diffgusting.cmd` on Windows), or open the native application. On Linux, `./install-desktop.sh` registers the application and icon for the current user; run it again after moving the extracted directory. The installer respects `XDG_DATA_HOME`. Packages are unsigned development distributions.
+Extract the ZIP into its final location and run its `diffgufting` launcher (`diffgufting.cmd` on Windows), or open the native application. On Linux, `./install-desktop.sh` registers the application and icon for the current user; run it again after moving the extracted directory. The installer respects `XDG_DATA_HOME`. Packages are unsigned development distributions.
 
 ## Platform targets
 

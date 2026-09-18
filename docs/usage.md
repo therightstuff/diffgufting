@@ -1,8 +1,8 @@
-# Using Diffgusting
+# Using Diffgufting
 
 ## Compare sources
 
-After `npm ci` and `npm run build`, run `npm start -- LEFT RIGHT` to launch an independent window. Use `npm start` for the source chooser. Add `--wait` to wait for the window to close. Packaged distributions provide a `diffgusting` launcher (`diffgusting.cmd` on Windows) with the same arguments and a bundled runtime.
+After `npm ci` and `npm run build`, run `npm start -- LEFT RIGHT` to launch an independent window. Use `npm start` for the source chooser. Add `--wait` to wait for the window to close. Packaged distributions provide a `diffgufting` launcher (`diffgufting.cmd` on Windows) with the same arguments and a bundled runtime.
 
 ```sh
 npm start -- ./before.txt ./after.txt
@@ -38,7 +38,7 @@ Cursor position and both scroll axes follow corresponding content across the act
 
 ## Layouts and preferences
 
-Side-by-side, unified, and merge layouts share documents and undo history. Adjacent typing and repeated deletion are one undo step until five seconds pass; Enter, paste, cut, replacements, transfers, merges, and reloads are separate steps. Undo and redo place the cursor at the changed text. Use Ctrl/Cmd+F for search, Ctrl/Cmd+S for save, Ctrl/Cmd+Z for undo, and Ctrl/Cmd+Shift+Z for redo. Theme and layout choices persist. Choose Device in the Theme selector to follow the operating system appearance while the app is open; Light and Dark remain fixed choices. Preferences controls the default per-document undo budget, initially 100 MiB. Full settings are stored in Electron's per-user application data directory as `settings.json`; `DIFFGUSTING_SETTINGS_DIR` overrides that directory when an isolated configuration is needed.
+Side-by-side, unified, and merge layouts share documents and undo history. Adjacent typing and repeated deletion are one undo step until five seconds pass; Enter, paste, cut, replacements, transfers, merges, and reloads are separate steps. Undo and redo place the cursor at the changed text. Use Ctrl/Cmd+F for search, Ctrl/Cmd+S for save, Ctrl/Cmd+Z for undo, and Ctrl/Cmd+Shift+Z for redo. Theme and layout choices persist. Choose Device in the Theme selector to follow the operating system appearance while the app is open; Light and Dark remain fixed choices. Preferences controls the default per-document undo budget, initially 100 MiB. Full settings are stored in Electron's per-user application data directory as `settings.json`; `DIFFGUFTING_SETTINGS_DIR` overrides that directory when an isolated configuration is needed.
 
 ## Git categories
 

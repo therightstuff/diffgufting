@@ -21,7 +21,7 @@ test('benchmark report comparison preserves raw samples', () => {
 });
 
 test('benchmark reports are written as versioned JSON', async t => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'diffgusting-benchmark-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'diffgufting-benchmark-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const reportPath = await writeBenchmarkReport(directory, { fixture: 'a', settings: {}, samples: [], correctness: true, unavailable: [] });
   assert.equal(JSON.parse(await readFile(reportPath, 'utf8')).version, 1);
