@@ -6,28 +6,14 @@ Define selected-path repository discovery and read-only commit selection.
 
 ## Requirements
 
-### Requirement: Explicit working-version choice
-
-The repository-discovery prompt SHALL provide buttons labeled Yes and No and explain that Yes opens the historical commit picker while No loads or retains the current working version from disk. Dismissing the prompt SHALL retain that working source. Loading SHALL remain independent of the choice, and obsolete prompts SHALL NOT affect replacement selections.
-
-#### Scenario: Decline historical selection
-
-- **WHEN** repository discovery offers commit selection and the user selects No
-- **THEN** the current working version remains selected and the commit picker does not open
-
-#### Scenario: Accept historical selection
-
-- **WHEN** the user selects Yes
-- **THEN** the scoped commit picker opens while the working source remains available until a commit is selected
-
 ### Requirement: Fixed base identity and selectable reference labels
 
-Git sources SHALL retain a full resolved base commit identity for the comparison lifetime. Working-tree sources SHALL capture their base at selection and be labeled Working tree; repositories without commits SHALL display that state without a fabricated revision. Headers SHALL prefer matching branch/tag names over hash-only labels, with deterministic default precedence of local branches, tags, then remote branches. Multiple matching names SHALL be selectable by clicking the label. Alias selection SHALL change only the displayed name, not contents, revision, or comparison identity. Full commit identity SHALL remain accessible. Ref movement SHALL NOT silently change the fixed base or imply that a moved name still points to it.
+Git sources SHALL retain a full resolved base commit identity for the comparison lifetime. Working-tree sources SHALL capture their base at selection and be labeled Working tree; repositories without commits SHALL display that state without a fabricated revision. Headers SHALL prefer matching branch/tag names over hash-only labels, with deterministic default precedence of local branches, tags, then remote branches. Clicking the revision label SHALL open the revision selector, which SHALL also expose multiple matching names for the current commit. Alias selection SHALL change only the displayed name, not contents, revision, or comparison identity. Full commit identity SHALL remain accessible. Ref movement SHALL NOT silently change the fixed base or imply that a moved name still points to it.
 
 #### Scenario: Multiple names identify one commit
 
 - **WHEN** branches or tags resolve to the displayed base commit, including annotated tags
-- **THEN** a name is shown preferentially and clicking it offers all matching names when more than one exists
+- **THEN** a name is shown preferentially and opening its revision selector offers all matching names when more than one exists
 
 #### Scenario: Display an unreferenced commit
 
@@ -50,17 +36,17 @@ A Git-backed file header SHALL display an accessible dirty circle beside its rev
 
 ### Requirement: Discover the selected path's repository
 
-For an accepted filesystem selection, the host SHALL discover only the Git repository owning that file or folder and SHALL NOT search descendant folders for repositories. Discovery SHALL support linked worktrees and submodules. When a repository is found, the application SHALL offer a yes/no dialog to pick a specific commit for that side. Filesystem loading SHALL begin without waiting for that choice. No SHALL keep the filesystem source; Yes SHALL open the commit picker.
+For an accepted filesystem selection, the host SHALL discover only the Git repository owning that file or folder and SHALL NOT search descendant folders for repositories. Discovery SHALL support linked worktrees and submodules. When a repository is found, the application SHALL expose an inline revision selector for that side without a discovery dialog. Filesystem loading SHALL begin independently; the working source SHALL remain selected until the user explicitly chooses another version.
 
 #### Scenario: Select a tracked file inside a repository
 
 - **WHEN** the user selects a file within a repository
-- **THEN** the application offers commit selection for that repository while retaining the file's relative path
+- **THEN** the application exposes inline commit selection for that repository while retaining the file's relative path
 
 #### Scenario: Select a folder containing repositories
 
 - **WHEN** a selected folder is outside any repository but contains one or more repository directories
-- **THEN** no commit-selection prompt is offered merely because of those descendants
+- **THEN** no revision selector is offered merely because of those descendants
 
 #### Scenario: Select within a submodule
 
@@ -70,7 +56,7 @@ For an accepted filesystem selection, the host SHALL discover only the Git repos
 #### Scenario: Select the superproject
 
 - **WHEN** the selected folder belongs to a superproject containing submodules
-- **THEN** the prompt concerns the superproject and does not recursively request submodule revisions
+- **THEN** the selector concerns the superproject and does not recursively request submodule revisions
 
 #### Scenario: Git is unavailable
 
@@ -103,12 +89,12 @@ The commit picker SHALL display repository-wide history reachable from captured 
 
 ### Requirement: Scoped immutable commit sources
 
-Selecting a commit SHALL load its full immutable object ID on the invoking side, retaining the selected file or folder's repository-relative scope. Canceling the picker SHALL retain the filesystem selection. Selected historical contents SHALL remain read-only, and picking commits SHALL NOT check out revisions or modify references, the index, or the working tree. Missing paths SHALL have an explicit absent-source state retaining their original kind and scope.
+Selecting a commit SHALL load its full immutable object ID on the invoking side, retaining the selected file or folder's repository-relative scope. Canceling the picker SHALL retain the previously selected source, whether working or historical. Selected historical contents SHALL remain read-only, and picking commits SHALL NOT check out revisions or modify references, the index, or the working tree. Missing paths SHALL have an explicit absent-source state retaining their original kind and scope.
 
 #### Scenario: Select different commits on each side
 
 - **WHEN** the user picks commits independently for both sides
-- **THEN** each side loads its selected snapshot and the application automatically compares their contents without changing either repository
+- **THEN** each draft side loads its selected snapshot and submission opens the comparison without changing either repository; choosing a different revision from an open comparison creates or activates a separate comparison
 
 #### Scenario: Selected path did not exist
 
@@ -118,9 +104,35 @@ Selecting a commit SHALL load its full immutable object ID on the invoking side,
 #### Scenario: Cancel commit selection
 
 - **WHEN** the user dismisses the graph without choosing a commit
-- **THEN** the selected filesystem source remains and history-loading resources are released
+- **THEN** the previously selected source remains and history-loading resources are released
 
 #### Scenario: Replace selection while browsing history
 
-- **WHEN** the source selection changes while its graph or repository prompt is pending
-- **THEN** that picker or prompt cannot alter the new source and its background resources are closed
+- **WHEN** the source selection changes while its graph is pending
+- **THEN** that picker cannot alter the new source and its background resources are closed
+
+### Requirement: Inline working and historical version selection
+
+Each Git-backed source SHALL expose a keyboard-accessible combobox next to its path on New and next to its file/folder root at the top of an open comparison. The displayed value SHALL identify the working version or chosen branch, tag, or commit. Opening the control SHALL offer the scoped history picker and an explicit working-version choice. Full resolved IDs SHALL remain accessible. Non-Git sources SHALL show their working identity without an unusable Git control.
+
+Choices in an incomplete draft SHALL update only the invoking draft side. Once a draft contains a completed pair, selecting a different revision SHALL preserve that pair and create or activate a separate member of its group, even before explicit submission. An open comparison's choice SHALL create or activate a separate comparison in its related group without changing the original fixed identity, buffers, or history. Loading failure or cancellation SHALL preserve the original active comparison. Obsolete picker results SHALL NOT affect another comparison or replacement source.
+
+#### Scenario: Choose history without an alert
+
+- **WHEN** repository discovery completes for a selected source
+- **THEN** its working-version combobox becomes available without a Yes/No dialog or automatic popup
+
+#### Scenario: Return to working contents
+
+- **WHEN** the user selects the working version from a historical source's combobox
+- **THEN** the same filesystem scope is loaded, updating the draft or activating a separate grouped comparison as appropriate
+
+#### Scenario: Select a branch or tag
+
+- **WHEN** a branch or tag is chosen
+- **THEN** its resolved commit is fixed for the comparison and its name is displayed while valid, with access to the full ID
+
+#### Scenario: Failed revision replacement
+
+- **WHEN** a revision selected from an open comparison fails to load
+- **THEN** the original comparison remains active and usable and an actionable error is shown

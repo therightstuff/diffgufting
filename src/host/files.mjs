@@ -66,12 +66,12 @@ export async function readInventory(root, options = defaults) {
   return { version: 1, root: absoluteRoot, entries: entries.sort((left, right) => left.path.localeCompare(right.path)), batchSize: options.inventoryBatchSize };
 }
 
-export async function readInventorySource(source, options = defaults) {
+export async function readInventorySource(source, options = defaults, discoveredInventory = null) {
   if (source?.kind !== 'file') return null;
   if (typeof source.path !== 'string') throw new Error('Invalid filesystem source');
   const root = path.resolve(source.path); const info = await lstat(root);
   if (!info.isDirectory()) return null;
-  const inventory = await readInventory(root, options);
+  const inventory = discoveredInventory ?? await readInventory(root, options);
   return {
     source: { ...source, path: root }, directory: true,
     entries: inventory.entries.filter(entry => entry.kind !== 'directory').map(entry => ({

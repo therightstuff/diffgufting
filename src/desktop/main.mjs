@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme, shell } from 'electron';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import { settings } from '../core/settings.mjs';
 import { applyTheme, subscribeToAppearance } from './theme.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+let application;
 let window; let workspaces; let pendingClose = false; let rendererReady = false; let dirty = false; let preferences = settings(); let appearance = 'dark'; let stopAppearanceUpdates; let initial; let initialComparison;
 const send = value => { if (window && !window.isDestroyed()) window.webContents.send('diffgusting:event', value); };
 function preferenceState() { return { preferences, appearance }; }
@@ -35,8 +36,11 @@ async function launch() {
   const argv = rawArgs.filter((arg, index) => (separator >= 0 && index >= separator) || !/^--(?:inspect(?:-brk)?|remote-debugging-port)=/.test(arg));
   initial = argv.length ? parseArguments(argv) : null;
   await app.whenReady();
-  app.dock?.setIcon(path.join(root, 'assets/branding/diffgusting-icon.png'));
   const settingsDir = process.env.DIFFGUSTING_SETTINGS_DIR ?? app.getPath('userData');
+  const packageInfo = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  application = Object.freeze({ name: packageInfo.name, version: packageInfo.version, description: packageInfo.description, logo: '../assets/branding/diffgusting-logo.png', repository: packageInfo.repository.url, support: packageInfo.funding.url });
+  app.setName(application.name);
+  app.dock?.setIcon(path.join(root, 'assets/branding/diffgusting-icon.png'));
   const settingsFile = path.join(settingsDir, 'settings.json');
   const recentFile = path.join(settingsDir, 'recent-comparisons.json');
   let recent = []; let recentWrite = Promise.resolve();
@@ -55,22 +59,34 @@ async function launch() {
   workspaces.options = preferences;
   appearance = applyTheme(nativeTheme, preferences.theme);
   stopAppearanceUpdates = subscribeToAppearance(nativeTheme, () => preferences.theme, publishAppearance);
-  window = new BrowserWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 600, title: 'Diffgusting', show: false, backgroundColor: appearance === 'dark' ? '#171a21' : '#f5f4f0', icon: path.join(root, 'assets/branding/diffgusting-icon.png'), webPreferences: { preload: path.join(root, 'src/desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 600, title: application.name, show: false, backgroundColor: appearance === 'dark' ? '#171a21' : '#f5f4f0', icon: path.join(root, 'assets/branding/diffgusting-icon.png'), webPreferences: { preload: path.join(root, 'src/desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   const eventMenu = (label, command, accelerator) => ({ label, accelerator, click: () => send({ type: 'command', command }) });
   function updateMenu() { Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    { label: 'File', submenu: [{ label: 'Recent', submenu: recent.length ? recent.map(item => ({ label: item.label, click: () => send({ type: 'recent-open', key: item.key }) })) : [{ label: 'No recent comparisons', enabled: false }] }, eventMenu('Save', 'save', 'CmdOrCtrl+S'), eventMenu('Save As…', 'save-as', 'CmdOrCtrl+Shift+S'), eventMenu('Close comparison', 'close-comparison'), { role: 'close' }] },
+    ...(process.platform === 'darwin' ? [{ label: application.name, submenu: [{ label: `About ${application.name}`, click: () => send({ type: 'command', command: 'about' }) }, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    { label: 'File', submenu: [eventMenu('New…', 'new-comparison', 'CmdOrCtrl+N'), { label: 'Recent', submenu: recent.length ? recent.map(item => ({ label: item.label, click: () => send({ type: 'recent-open', key: item.key }) })) : [{ label: 'No recent comparisons', enabled: false }] }, eventMenu('Save', 'save', 'CmdOrCtrl+S'), eventMenu('Save As…', 'save-as', 'CmdOrCtrl+Shift+S'), eventMenu('Close comparison', 'close-comparison'), { role: 'close' }] },
     { label: 'Edit', submenu: [eventMenu('Undo', 'undo', 'CmdOrCtrl+Z'), eventMenu('Redo', 'redo', 'CmdOrCtrl+Shift+Z'), { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }] },
+    ...(process.platform === 'darwin' ? [] : [{ label: 'Help', submenu: [{ label: `About ${application.name}`, click: () => send({ type: 'command', command: 'about' }) }] }]),
   ])); }
   updateMenu();
   if (initial) initialComparison = await openSession(initial);
-  ipc('bootstrap', async () => { rendererReady = true; return { ...preferenceState(), comparison: initialComparison ?? null, workspace: workspaces.snapshot(), comparisons: workspaces.list() }; });
+  else await workspaces.newDraft();
+  ipc('bootstrap', async () => { rendererReady = true; return { ...preferenceState(), application, comparison: initialComparison ?? null, workspace: workspaces.snapshot(), comparisons: workspaces.list(), groups: workspaces.groupList() }; });
+  ipc('about-link', link => {
+    const destination = link === 'repository' ? application.repository : link === 'support' ? application.support : null;
+    if (!destination) throw new Error('Unknown About link');
+    return shell.openExternal(destination);
+  });
   ipc('open', openSession);
   ipc('comparison-activate', id => workspaces.activate(id));
   ipc('comparison-close', id => workspaces.remove(id));
+  ipc('comparison-back', () => workspaces.back());
+  ipc('comparison-forward', () => workspaces.forward());
+  ipc('comparison-new', () => workspaces.newDraft());
+  ipc('comparison-submit', () => workspaces.submitDraft());
+  ipc('comparison-type', type => workspaces.setDraftType(type));
   ipc('recent-open', key => {
     const item = recent.find(entry => entry.key === key);
     if (!item) throw new Error('Recent comparison is no longer available');
@@ -85,8 +101,9 @@ async function launch() {
   const histories = new Map();
   ipc('history-open', async (side, generation) => { const session = await ensureSession(); const opened = await session.openHistory(side, generation); histories.set(opened.id, session); return opened; });
   ipc('history-page', (id, cursor) => histories.get(id)?.historyPage(id, cursor));
-  ipc('history-close', id => { histories.get(id)?.closeHistory(id); histories.delete(id); });
-  ipc('source-commit', (side, generation, ref) => workspaces.selectCommit(side, generation, ref));
+  ipc('history-close', id => { const session = histories.get(id); if (session) { workspaces.cancelOpening(session); session.closeHistory(id); } histories.delete(id); });
+  ipc('source-commit', (side, generation, ref, owner) => workspaces.selectCommit(side, generation, ref, owner));
+  ipc('source-working', (side, generation, owner) => workspaces.selectWorking(side, generation, owner));
   ipc('read', file => workspaces.read(file));
   ipc('selected-entry', pathname => workspaces.loadSelected(pathname));
   ipc('save', request => workspaces.save(request.path, request.text, request.fingerprint, request.format));

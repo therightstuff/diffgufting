@@ -1,5 +1,27 @@
 # Changelog
 
+## [comparison-creation-and-navigation] - 2026-09-18
+
+### Added
+
+- Added an explicit New comparison page with independently loaded sources, File/Folder selection, and an Open comparison action.
+- Added retained comparison groups with sidebar navigation, group-local Back/Forward history, and inline Git version selection.
+
+### Changed
+
+- Updated folder browsing to scroll incrementally with bounded rendered rows.
+
+## [application-identity-and-about] - 2026-09-16
+
+### Added
+
+- Added consistent diffgusting application identity and an accessible, package-driven About dialog for development and packaged desktop launches.
+- Added repository and author-support links to About, opening in the system browser without navigating the editor.
+
+### Changed
+
+- Preserved existing preferences and recent comparisons when applying the runtime application identity.
+
 ## [comparison-workspace-navigation] - 2026-09-16
 
 ### Added

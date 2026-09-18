@@ -2,7 +2,7 @@
 
 ![Diffgusting human-face logo](assets/branding/diffgusting-logo.png)
 
-A desktop comparison and merge editor for files, folders, and Git snapshots. Choose either source independently, see folder inventory while comparison work continues, retain comparisons by path and revision, and navigate their panes together with a document-wide change overview. Diffgusting keeps staged and unstaged changes visible together, groups ordinary typing into practical undo steps, follows Light, Dark, or Device appearance preferences, and requires review when another program changes a file you are editing.
+A desktop comparison and merge editor for files, folders, and Git snapshots. Start a New comparison, choose File or Folder and each source independently, and see it in Open Comparisons as soon as a source is selected. Changing a ready pair preserves it in the group’s Back/Forward history, even before explicit submission. Path and revision changes stay in one group slot with Back/Forward history; New preserves the current comparison and any loaded, unsubmitted work without a close prompt. Diffgusting keeps staged and unstaged changes visible together, groups ordinary typing into practical undo steps, follows Light, Dark, or Device appearance preferences, requires review when another program changes a file you are editing, and provides an About dialog with project and author-support links.
 
 The application uses Node.js, Electron, and CodeMirror. Install with `npm ci`, build with `npm run build`, then open the source chooser with `npm start`.
 

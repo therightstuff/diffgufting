@@ -54,3 +54,7 @@ For this identified fixture and machine family, the recorded acceptance budgets 
 Native Windows and Linux runtime smoke checks are unavailable on this macOS host. macOS Intel packaging is complete, but native Intel runtime validation is also outstanding. Before release, run the editor and host suites on those target systems and verify the native launcher, detached/wait lifecycle, file watching, save/review flow, and operating-system icon appearance.
 
 Use [testing](testing.md) for commands and [setup](setup.md) for packaging. Do not treat cross-platform artifact creation as native runtime validation.
+
+## Application identity and About
+
+On macOS Apple Silicon, the desktop and packaged-app checks verified the `diffgusting` application menu name, package-derived About version and description, logo resolution, keyboard dismissal with focus restoration, and the repository and support destinations. Settings and recent comparisons continue to use the resolved user-data directory captured before runtime naming is changed. Native Windows and Linux checks remain unavailable on this host.

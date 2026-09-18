@@ -55,10 +55,13 @@ export async function revisionLabels(repo, id, options = defaults) {
 export async function openHistory(repo, { pageSize = 100, options = defaults } = {}) {
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error('History page size must be between 1 and 100');
   const root = await rootOf(repo, options);
-  const refRecords = (await git(root, ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags'], options)).toString().trim().split('\n').filter(Boolean);
+  const refRecords = (await git(root, ['for-each-ref', '--format=%(objectname)%09%(*objectname)%09%(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags'], options)).toString().trim().split('\n').filter(Boolean);
   const labels = new Map();
+  const references = [];
   const refs = refRecords.map(record => {
-    const [id, label] = record.split(' ');
+    const [object, peeled, label] = record.split('\t');
+    const id = peeled || object;
+    references.push({ id, label });
     if (id && label) labels.set(id, [...(labels.get(id) ?? []), label]);
     return id;
   }).filter(Boolean);
@@ -109,6 +112,7 @@ export async function openHistory(repo, { pageSize = 100, options = defaults } =
   };
   const cursorToken = randomUUID(); let expectedCursor = null; let offset = 0;
   return {
+    references,
     async page(cursor = null) {
       if (closed) throw new Error('History session is closed');
       if (cursor !== expectedCursor) throw new Error('Invalid history cursor');
@@ -153,7 +157,7 @@ export async function attachRevision(tree, options = defaults) {
 export async function readGitSource(input, options = defaults, withRevision = true, lazy = false) {
   const repo = await rootOf(input.repo, options);
   const selection = relativePath(input.path ?? '');
-  const source = { ...input, repo, path: selection };
+  const source = { ...input, repo, canonicalRepo: repo, path: selection };
   const live = ['@worktree', '@index', '@base', '@ours', '@theirs'].includes(source.ref);
   let records = [];
   if (live) {

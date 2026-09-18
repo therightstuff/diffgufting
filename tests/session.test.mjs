@@ -95,8 +95,34 @@ test('folder inventory is delivered in configured bounded batches', async t => {
   await session.load('left', { kind: 'file', path: root });
   const inventoryEvents = events.filter(event => event.type === 'source-inventory');
   assert.equal(inventoryEvents.length, 2);
-  assert.deepEqual(inventoryEvents.at(-1).inventory.entries.map(entry => entry.path), ['a', 'b', 'c']);
+  assert.ok(inventoryEvents.every(event => event.inventory.entries.length <= 2));
+  assert.deepEqual(inventoryEvents.flatMap(event => event.inventory.entries.map(entry => entry.path)), ['a', 'b', 'c']);
+  assert.deepEqual(inventoryEvents.map(event => event.inventory.offset), [0, 2]);
+  assert.deepEqual(session.source('left').inventory.entries.map(entry => entry.path), ['a', 'b', 'c']);
   assert.equal(inventoryEvents.at(-1).inventory.complete, true);
+});
+
+test('replacing a folder during inventory delivery cancels its remaining batches', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'diffgusting-inventory-cancel-'));
+  const replacement = path.join(root, 'replacement'); await mkdir(replacement);
+  await writeFile(path.join(replacement, 'current'), 'current');
+  await Promise.all(Array.from({ length: 100 }, (_, index) => writeFile(path.join(root, String(index)), 'old')));
+  const session = new Session({}, { inventoryBatchSize: 2 });
+  t.after(async () => { session.close(); await rm(root, { recursive: true, force: true }); });
+  const events = []; let switched = false; let next;
+  session.subscribe(event => {
+    events.push(event);
+    if (event.type === 'source-inventory' && !switched) {
+      switched = true;
+      next = session.load('left', { kind: 'file', path: replacement });
+    }
+  });
+  await assert.rejects(session.load('left', { kind: 'file', path: root }), /canceled/);
+  await next;
+  const start = events.findIndex(event => event.type === 'source' && event.generation === 2);
+  assert.ok(start >= 0);
+  assert.ok(events.slice(start).filter(event => event.type === 'source-inventory').every(event => event.generation === 2));
+  assert.deepEqual(session.source('left').inventory.entries.map(entry => entry.path), ['current']);
 });
 
 test('comparison cache eviction never releases an authorized dirty document', async t => {

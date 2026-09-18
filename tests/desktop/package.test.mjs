@@ -18,4 +18,17 @@ test('packaged macOS launcher uses bundled runtime and replacement icon', { skip
   const page = await app.firstWindow();
   await page.getByRole('heading', { name: 'Every change has a story.' }).waitFor();
   assert.equal(await page.locator('header img').evaluate(image => image.naturalWidth > 0), true);
+  await app.evaluate(({ Menu }) => {
+    const find = menu => {
+      for (const item of menu?.items ?? []) {
+        if (item.label === 'About diffgusting') return item;
+        const child = find(item.submenu);
+        if (child) return child;
+      }
+    };
+    find(Menu.getApplicationMenu()).click();
+  });
+  await page.locator('#about-dialog').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#about-dialog').innerText(), /0\.1\.0/);
+  assert.equal(await page.locator('#about-logo').evaluate(image => image.naturalWidth > 0), true);
 });

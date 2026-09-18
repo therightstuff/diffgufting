@@ -112,3 +112,13 @@ test('directory inventory source retains metadata without eager text content', a
   const tree = await readInventorySource({ kind: 'file', path: root });
   assert.equal(tree.entries[0].lazy, true); assert.equal(tree.entries[0].text, undefined); assert.match(tree.entries[0].fingerprint, /^metadata:/);
 });
+
+test('a discovered inventory is reused when constructing its lazy source tree', async t => {
+  const root = await fixture(t); await writeFile(path.join(root, 'first'), 'first');
+  const inventory = await readInventory(root);
+  await writeFile(path.join(root, 'later'), 'later');
+  const tree = await readInventorySource({ kind: 'file', path: root }, undefined, inventory);
+  assert.deepEqual(tree.entries.map(entry => entry.path), ['first']);
+  assert.equal(tree.entries[0].lazy, true); assert.equal(tree.entries[0].text, undefined);
+  assert.deepEqual((await readInventorySource({ kind: 'file', path: root })).entries.map(entry => entry.path), ['first', 'later']);
+});

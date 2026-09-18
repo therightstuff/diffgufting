@@ -45,7 +45,8 @@ export class Session {
     if (!descriptor || typeof descriptor !== 'object') throw new Error('Invalid source descriptor');
     const source = this.source(side); const generation = ++source.generation;
     source.cancel?.(); source.worker?.terminate();
-    Object.assign(source, { descriptor, repository: null, status: 'loading', progress: { progress: 0, phase: 'Starting' }, tree: null, error: null, lastProgressEvent: 0 });
+    this.current = null;
+    Object.assign(source, { descriptor, repository: null, inventory: null, status: 'loading', progress: { progress: 0, phase: 'Starting' }, tree: null, error: null, lastProgressEvent: 0 });
     this.request[side] = descriptor;
     this.emit({ type: 'source', side, generation, source: this.snapshot(source) });
     const worker = new Worker(new URL('./source-worker.mjs', import.meta.url), { workerData: { source: descriptor, options: this.options } });
@@ -53,7 +54,7 @@ export class Session {
     try {
       const tree = await new Promise((resolve, reject) => {
         source.cancel = () => {
-          if (source.inventory) this.emit({ type: 'source-inventory', side, generation, inventory: { ...source.inventory, canceled: true, complete: true } });
+          if (source.inventory) this.emit({ type: 'source-inventory', side, generation, inventory: { ...source.inventory, offset: source.inventory.entries.length, entries: [], canceled: true, complete: true } });
           reject(new Error('Source loading canceled'));
         };
         worker.on('message', message => {
@@ -68,11 +69,12 @@ export class Session {
             }
           } else if (message.type === 'inventory') {
             if (source.generation === generation) {
-              const entries = new Map((source.inventory?.entries ?? []).map(entry => [entry.path, entry]));
-              for (const entry of message.inventory.entries) entries.set(entry.path, entry);
-              source.inventory = { ...message.inventory, entries: [...entries.values()].sort((left, right) => left.path.localeCompare(right.path)) };
-              this.cache.set(cacheKey('inventory', 1, side, generation), source.inventory);
-              this.emit({ type: 'source-inventory', side, generation, inventory: source.inventory });
+              const entries = source.inventory?.entries ?? [];
+              entries.push(...message.inventory.entries);
+              source.inventory = { ...message.inventory, entries };
+              // The worker already sorted these disjoint batches. Re-sending or caching
+              // each growing prefix makes main-thread serialization quadratic.
+              this.emit({ type: 'source-inventory', side, generation, inventory: message.inventory });
             }
           } else if (message.type === 'result') resolve(message.tree);
           else if (message.type === 'error') reject(new Error(message.error));
@@ -81,6 +83,7 @@ export class Session {
         worker.once('exit', code => { if (code !== 0) reject(new Error(`Source worker exited with ${code}`)); });
       });
       if (this.closed || source.generation !== generation) throw new Error('Source loading canceled');
+      if (this.request.comparisonType && (tree.directory ? 'folder' : 'file') !== this.request.comparisonType) throw new Error(`Choose a ${this.request.comparisonType} source for this comparison`);
       await this.authorize(tree);
       if (this.closed || source.generation !== generation) throw new Error('Source loading canceled');
       this.request[side] = tree.source;
@@ -127,9 +130,10 @@ export class Session {
     const source = this.source(side);
     if (source.generation !== generation || !source.repository) throw new Error('The selected source has no available repository history');
     const history = await openHistory(source.repository.repo, { options: this.options });
+    if (this.closed || source.generation !== generation) { history.close(); throw new Error('The selected source is no longer available'); }
     const id = `${side}:${generation}:${++this.historyGeneration}:${randomUUID()}`;
     this.histories ??= new Map(); this.histories.set(id, history);
-    return { id, repository: source.repository };
+    return { id, repository: source.repository, references: history.references };
   }
   async historyPage(id, cursor) {
     const history = this.histories?.get(id);
@@ -183,6 +187,7 @@ export class Session {
       }
     }
     if (this.request.output) result.output = { path: await this.allow(this.request.output), state: await readDisk(this.request.output, this.options) };
+    result.generations = Object.fromEntries(['left', 'right'].map(side => [side, this.source(side).generation]));
     this.current = result;
     this.emit({ type: 'comparison', result });
     return result;
@@ -190,7 +195,9 @@ export class Session {
   async refresh() {
     if (this.closed) throw new Error('Session closed');
     if (!this.request.left || !this.request.right) throw new Error('Choose two comparison sources');
-    await Promise.all(['left', 'right'].map(side => this.load(side, this.request[side])));
+    const loads = await Promise.allSettled(['left', 'right'].map(side => this.load(side, this.request[side])));
+    const failure = loads.find(result => result.status === 'rejected' && !/Source loading canceled/.test(result.reason.message)) ?? loads.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
     if (!this.current) return this.calculate();
     return this.current;
   }
@@ -202,8 +209,9 @@ export class Session {
     return state;
   }
   async loadSelected(pathname) {
-    if (this.closed || !this.current) throw new Error('Comparison is not available');
-    const row = this.current.rows.find(row => row.path === pathname);
+    if (this.closed) throw new Error('Comparison is not available');
+    const ready = Object.entries(this.sources).filter(([, source]) => source.status === 'ready');
+    const row = ready.length === 1 ? { path: pathname, [ready[0][0]]: ready[0][1].tree.entries.find(entry => entry.path === pathname), status: 'loaded' } : this.current?.rows.find(row => row.path === pathname);
     if (!row) throw new Error('Selected file is no longer available');
     const generations = Object.fromEntries(['left', 'right'].map(side => [side, this.source(side).generation]));
     for (const side of ['left', 'right']) {
@@ -338,14 +346,16 @@ export class Session {
     finally { this.polling = false; }
   }
   async start() {
-    if (this.timer || this.closed) return;
-    this.timer = setInterval(() => this.poll(), this.options.reconcileMs);
+    if (this.closed) return;
+    this.timer ??= setInterval(() => this.poll(), this.options.reconcileMs);
+    this.watchedRoots ??= new Set();
     const roots = new Set();
     for (const source of [this.sources.left.descriptor, this.sources.right.descriptor, this.request.base].filter(Boolean)) {
       if (source.kind === 'git') roots.add(path.resolve(source.repo));
       else { const absolute = path.resolve(source.path); roots.add((await lstat(absolute)).isDirectory() ? absolute : path.dirname(absolute)); }
     }
     for (const root of roots) {
+      if (this.watchedRoots.has(root)) continue;
       try {
         const watcher = watch(root, { recursive: true }, (eventType, filename) => {
           this.invalidatedPaths ??= new Map();
@@ -358,6 +368,7 @@ export class Session {
         });
         watcher.on('error', error => { this.watchUnavailable = true; this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }); });
         this.watchers.push(watcher);
+        this.watchedRoots.add(root);
       } catch (error) { this.watchUnavailable = true; this.emit({ type: 'error', message: `Watching ${root}: ${error.message}. Periodic reconciliation remains active.` }); }
     }
   }

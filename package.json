@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "A desktop diff editor with layered Git changes and explicit external-change review",
+  "repository": { "type": "git", "url": "https://github.com/therightstuff/diffgusting" },
+  "funding": { "type": "individual", "url": "https://industrialcuriosity.com/shop" },
   "type": "module",
   "main": "src/desktop/main.mjs",
   "bin": { "diffgusting": "bin/diffgusting.mjs" },

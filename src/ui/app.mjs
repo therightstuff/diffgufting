@@ -14,13 +14,13 @@ const fromModel = Annotation.define();
 const documents = new Map();
 const views = [];
 let comparison = null; let selected = null; let active = null; let resultDocument = null;
-let preferences; let mergeView; let syncing = false; let review; let closeAction; let navigation;
+let preferences; let application; let mergeView; let syncing = false; let review; let closeAction; let navigation; let aboutReturnFocus;
 const workspaces = new Map();
-let workspaceId = null; let openComparisons = []; let workspaceChanging = false;
+let workspaceId = null; let openComparisons = []; let comparisonGroups = []; let workspaceChanging = false;
 const sourceState = { left: null, right: null };
 const inventories = { left: null, right: null };
 const diffResults = new IncrementalDiffs();
-let fileRowLimit = 200;
+let fileListing = []; let fileAnchor = null; let selectingEntry = 0; let fileRenderFrame = null;
 const expandedDirectories = new Set(['']);
 const browse = { linked: true, locations: { left: null, right: null }, latest: null };
 let historyPicker = null;
@@ -165,12 +165,10 @@ function title(doc, side) {
     const aliasKey = `${side}:${revision.id}`;
     const names = revision.labels;
     const chosen = names.includes(aliases?.[aliasKey]) ? aliases[aliasKey] : names[0] ?? revision.id?.slice(0, 12) ?? 'No commits';
-    if (names.length > 1) {
-      const select = element('select', undefined, 'revision-name'); select.setAttribute('aria-label', `${side} revision display name`); select.title = `Base commit ${revision.id}`;
-      for (const name of names) { const option = element('option', name); option.value = name; select.append(option); }
-      select.value = chosen; select.onchange = () => { if (aliases) aliases[aliasKey] = select.value; };
-      identity.append(select);
-    } else { const label = element('span', chosen, 'revision-name'); label.title = revision.id ?? 'Repository has no commits'; identity.append(label); }
+    const label = ['left', 'right'].includes(side)
+      ? button(chosen, () => showHistory(side, sourceState[side]?.generation), 'revision-name')
+      : element('span', chosen, 'revision-name');
+    label.title = revision.id ?? 'Repository has no commits'; identity.append(label);
     node.baseText = entry?.baseText ?? entry?.text ?? '';
     identity.append(element('span', '', 'base-dirty'));
     if (revision.working || side === 'result') identity.append(element('span', side === 'result' ? 'Merge result' : ({ '@index': 'Index', '@base': 'Base stage', '@ours': 'Ours stage', '@theirs': 'Theirs stage' })[source.ref] ?? 'Working tree', 'badge'));
@@ -230,7 +228,7 @@ function renderEditors() {
   destroyViews(); $('#content').replaceChildren();
   if (!selected) return;
   if (selected.left?.lazy || selected.right?.lazy) {
-    call('selectedEntry', selected.path).then(row => { selected = row; renderEditors(); }).catch(error => notice(error.message));
+    safely(() => selectFile(selected.path));
     $('#content').append(element('p', 'Loading selected file…', 'loading-file'));
     return;
   }
@@ -275,7 +273,7 @@ function stashWorkspace() {
   const record = workspaces.get(workspaceId); if (!record) return;
   for (const { doc, view } of views) selection(doc, view);
   Object.assign(record, { comparison, selectedPath: selected?.path, activeId: active?.id, resultId: resultDocument?.id, layout: preferences.layout,
-    positions: new Map(views.map(({ doc }) => [doc.id, { ...doc.selection }])), sources: { ...sourceState } });
+    positions: new Map(views.map(({ doc }) => [doc.id, { ...doc.selection }])), sources: { ...sourceState }, inventories: { ...inventories }, fileScroll: $('#file-region').scrollTop, filter: $('#filter').value, fileView: $('#file-view').value, expanded: [...expandedDirectories] });
 }
 function showEmptyWorkspace() {
   const empty = element('div', undefined, 'empty'); const icon = element('img'); icon.src = '../assets/branding/diffgusting-icon.png'; icon.alt = '';
@@ -294,10 +292,13 @@ function comparisonDocumentIds(result, id) {
 function releaseUnowned(ids) {
   for (const id of ids) if (![...workspaces.values()].some(record => record.documents.has(id))) documents.delete(id);
 }
-function acceptWorkspace(next, list = openComparisons) {
+function acceptWorkspace(next, list = openComparisons, groups = comparisonGroups) {
   openComparisons = list;
+  comparisonGroups = groups;
   if (next?.id === workspaceId) {
-    const record = workspaces.get(workspaceId); if (record) { record.key = next.key; record.label = next.label; }
+    const record = workspaces.get(workspaceId); if (record) { record.key = next.key; record.label = next.label; record.type = next.type; }
+    if (next.comparison) acceptComparison(next.comparison);
+    renderSourceControls();
     renderDocuments(); return;
   }
   stashWorkspace(); workspaceChanging = true; destroyViews();
@@ -306,18 +307,25 @@ function acceptWorkspace(next, list = openComparisons) {
     for (const document of record.documents) abandoned.add(document);
     workspaces.delete(id);
   }
-  if ($('#git-choice-dialog').open) $('#git-choice-dialog').close();
   if ($('#history-dialog').open && !historyPicker?.selecting) $('#history-dialog').close();
   workspaceId = next?.id ?? null; selected = null; active = null; resultDocument = null; comparison = null;
-  if (!next) { releaseUnowned(abandoned); sourceState.left = sourceState.right = null; showEmptyWorkspace(); renderFiles(); renderDocuments(); workspaceChanging = false; return; }
+  selectingEntry++; fileListing = []; fileAnchor = null; inventories.left = inventories.right = null;
+  if (!next) {
+    releaseUnowned(abandoned); sourceState.left = sourceState.right = null;
+    for (const side of ['left', 'right']) { $(`#${side}-source`).value = ''; $(`#${side}-source`).dataset.committed = ''; }
+    showEmptyWorkspace(); renderFiles(); renderDocuments(); renderSourceControls(); workspaceChanging = false; return;
+  }
   let record = workspaces.get(next.id);
   if (!record) { record = { documents: new Set(), aliases: {}, layout: next.comparison?.base ? 'merge' : preferences.layout }; workspaces.set(next.id, record); }
   const nextIds = comparisonDocumentIds(next.comparison, next.id);
   for (const id of abandoned) if (nextIds.has(id)) record.documents.add(id);
   releaseUnowned(abandoned);
-  Object.assign(record, { key: next.key, label: next.label });
+  Object.assign(record, { key: next.key, label: next.label, type: next.type });
+  Object.assign(inventories, record.inventories);
+  $('#filter').value = record.filter ?? ''; $('#file-view').value = record.fileView ?? 'list';
+  expandedDirectories.clear(); for (const item of record.expanded ?? ['']) expandedDirectories.add(item);
   Object.assign(sourceState, next.sources);
-  if (next.key) for (const side of ['left', 'right']) {
+  for (const side of ['left', 'right']) {
     const descriptor = sourceState[side]?.descriptor;
     const input = $('#' + side + '-source');
     input.value = descriptor?.kind === 'git' ? `${descriptor.repo}/${descriptor.path ?? ''}` : descriptor?.path ?? '';
@@ -336,17 +344,51 @@ function acceptWorkspace(next, list = openComparisons) {
     active = documents.get(record.activeId) ?? resultDocument;
     renderEditors(); renderFiles();
   } else { const lone = loneComparison(); if (lone) acceptComparison(lone); else showEmptyWorkspace(); }
-  workspaceChanging = false; renderDocuments();
+  workspaceChanging = false; renderDocuments(); renderSourceControls(); renderFiles();
+  $('#file-region').scrollTop = record.fileScroll ?? 0; renderFiles();
+}
+function renderSourceControls() {
+  const record = workspaces.get(workspaceId); const creating = !record?.key;
+  document.body.classList.toggle('creating', creating);
+  $('#creation-title').hidden = !creating;
+  $('#comparison-type').hidden = !creating;
+  $('#open-comparison').hidden = !creating;
+  $('#link-locations').hidden = false;
+  for (const radio of document.querySelectorAll('[name="comparison-type"]')) radio.checked = radio.value === (record?.type ?? 'file');
+  for (const side of ['left', 'right']) {
+    const source = sourceState[side]; const revision = source?.tree?.revision;
+    if (!source || source.status === 'empty') $(`#${side}-progress`).hidden = true;
+    $(`#${side}-error`).textContent = source?.error ?? '';
+    $(`#${side}-source`).readOnly = false;
+    $(`#choose-${side}`).hidden = false;
+    const control = $(`#${side}-version`);
+    control.hidden = !source?.repository; control.disabled = source?.status !== 'ready';
+    control.setAttribute('role', 'combobox'); control.setAttribute('aria-haspopup', 'dialog'); control.setAttribute('aria-controls', 'history-dialog');
+    control.setAttribute('aria-expanded', String(historyPicker?.side === side));
+    const alias = record?.aliases?.[`${side}:${revision?.id}`];
+    control.textContent = revision?.working ? 'Working tree' : (revision?.labels?.includes(alias) ? alias : revision?.labels?.[0]) ?? revision?.id?.slice(0, 12) ?? 'No commits';
+    control.title = revision?.id ?? 'Repository has no commits';
+  }
+  $('#open-comparison').disabled = !['left', 'right'].every(side => sourceState[side]?.status === 'ready' && comparison?.generations?.[side] === sourceState[side]?.generation);
 }
 function renderDocuments() {
   const nav = $('#documents'); nav.replaceChildren();
-  for (const item of openComparisons) {
+  const newEntry = button('New…', () => call('comparisonNew'), `new-comparison${openComparisons.some(item => item.id === workspaceId) ? '' : ' selected'}`);
+  nav.append(newEntry);
+  const groups = comparisonGroups.length ? comparisonGroups : openComparisons.map(item => ({ key: item.id, current: item.id, members: [item] }));
+  for (const group of groups) {
+    const item = group.members.find(member => member.id === group.current) ?? group.members[0];
+    if (!item) continue;
+    const container = element('section', undefined, 'comparison-group');
     const row = element('div', undefined, 'comparison-item'); row.dataset.comparison = item.id;
     const label = item.label.split(' ↔ ').map(side => { const [file, ...revision] = side.split(' · '); return [file.split(/[\\/]/).at(-1), ...revision].join(' · '); }).join(' ↔ ');
-    const choose = button(label, () => switchComparison(() => call('comparisonActivate', item.id)), item.id === workspaceId ? 'selected' : '');
+    const choose = button(label, () => call('comparisonActivate', item.id), item.id === workspaceId ? 'selected' : '');
     choose.title = item.label; row.append(choose);
-    const close = button('×', () => closeComparison(item.id), 'close-comparison'); close.setAttribute('aria-label', 'Close comparison'); row.append(close); nav.append(row);
+      const close = button('×', () => closeComparison(item.id), 'close-comparison'); close.setAttribute('aria-label', 'Close comparison'); row.append(close); container.append(row);
+    nav.append(container);
   }
+  const group = comparisonGroups.find(item => item.members.some(member => member.id === workspaceId));
+  $('#comparison-back').disabled = !group?.canBack; $('#comparison-forward').disabled = !group?.canForward;
 }
 async function closeComparison(id = workspaceId) {
   const record = workspaces.get(id); if (!record) return;
@@ -370,14 +412,19 @@ async function protectDraft() {
     for (const doc of final) if (doc.writable && (doc.dirty || doc.pending.length)) await save(doc);
     if (final.some(doc => doc.dirty || doc.pending.length)) return false;
   }
+  if (choice === 'discard') for (const doc of final) { record.documents.delete(doc.id); documents.delete(doc.id); }
   return true;
 }
-async function switchComparison(action) { if (await protectDraft()) return action(); }
 function updateStatus() {
   $('#status').textContent = active ? `${active.dirty ? 'Unsaved' : 'Saved'} · ${active.past.length} undo steps · ${(active.bytes / 1024).toFixed(1)} KiB history${active.historyTruncated ? ' · OLDEST HISTORY EVICTED' : ''}${active.pending.length ? ` · ${active.pending.length} external version(s) need review` : ''}` : 'Ready';
   $('#save').disabled = !active?.writable; $('#undo').disabled = !active?.past.length; $('#redo').disabled = !active?.future.length;
 }
+function scheduleFiles() {
+  fileRenderFrame ??= requestAnimationFrame(() => { fileRenderFrame = null; renderFiles(); });
+}
 function renderFiles() {
+  if (fileRenderFrame !== null) { cancelAnimationFrame(fileRenderFrame); fileRenderFrame = null; }
+  const focusedPath = $('#files').contains(document.activeElement) ? document.activeElement.dataset.path : null;
   $('#files').replaceChildren();
   const rows = comparison?.rows ?? [...new Map(Object.values(inventories).flatMap(inventory => inventory?.entries ?? []).filter(entry => entry.kind !== 'directory').map(entry => [entry.path, { path: entry.path, status: 'pending' }])).values()];
   const discovered = Object.values(inventories).reduce((count, inventory) => count + (inventory?.entries?.filter(entry => entry.kind !== 'directory').length ?? 0), 0);
@@ -387,16 +434,42 @@ function renderFiles() {
   $('#inventory-progress').textContent = comparison ? `${rows.length} compared` : discovered ? `${discovered} discovered${canceled ? ' · canceled' : failed ? ' · incomplete' : incomplete ? ' · checking…' : ' · ready'}` : canceled ? 'canceled' : failed ? 'incomplete' : '';
   const filter = $('#filter').value.toLowerCase();
   const listing = $('#file-view').value === 'tree' ? treeRows(rows, filter) : rows.filter(row => row.path.toLowerCase().includes(filter));
-  const visibleRows = listing;
-  for (const row of visibleRows.slice(0, fileRowLimit)) {
-    const node = row.directory ? button(`${expandedDirectories.has(row.path) ? '▾' : '▸'} ${row.name}`, () => { if (expandedDirectories.has(row.path)) expandedDirectories.delete(row.path); else expandedDirectories.add(row.path); renderFiles(); }, 'directory') : comparison ? button(row.path || 'Selected file', async () => { selected = await call('selectedEntry', row.path); renderEditors(); renderFiles(); }, selected?.path === row.path ? 'selected' : '') : button(row.path || 'Selected file', () => {}, 'pending');
+  const rowHeight = 34;
+  const viewport = $('#file-region');
+  $('#files').style.height = `${listing.length * rowHeight}px`;
+  if (fileAnchor && !workspaceChanging) {
+    const index = listing.findIndex(row => row.path === fileAnchor.path);
+    if (index >= 0) viewport.scrollTop = index * rowHeight + fileAnchor.offset;
+  }
+  fileListing = listing;
+  const start = Math.max(0, Math.floor(viewport.scrollTop / rowHeight) - 12);
+  const end = Math.min(listing.length, start + Math.max(60, Math.ceil(viewport.clientHeight / rowHeight) + 24));
+  $('#files').style.position = 'relative';
+  for (const [index, row] of listing.slice(start, end).entries()) {
+    const node = row.directory ? button(`${expandedDirectories.has(row.path) ? '▾' : '▸'} ${row.name}`, () => { if (expandedDirectories.has(row.path)) expandedDirectories.delete(row.path); else expandedDirectories.add(row.path); renderFiles(); }, 'directory') : comparison ? button(row.path || 'Selected file', () => selectFile(row.path), selected?.path === row.path ? 'selected' : '') : button(row.path || 'Selected file', () => {}, 'pending');
+    node.dataset.path = row.path;
+    node.onkeydown = event => {
+      const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+      if (!step && !['Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); const target = event.key === 'Home' ? 0 : event.key === 'End' ? listing.length - 1 : Math.max(0, Math.min(listing.length - 1, start + index + step));
+      fileAnchor = null; viewport.scrollTop = target * rowHeight; renderFiles();
+      [...$('#files').children].find(child => child.dataset.path === listing[target]?.path)?.focus();
+    };
     if (row.directory) { node.setAttribute('aria-expanded', String(expandedDirectories.has(row.path))); node.setAttribute('aria-level', String(row.depth + 1)); }
     else if ($('#file-view').value === 'tree') node.setAttribute('aria-level', String(row.depth + 1));
     if (row.depth) node.style.paddingInlineStart = `${0.7 + row.depth * 1.1}rem`;
     if (!comparison) { node.setAttribute('aria-disabled', 'true'); node.setAttribute('aria-label', `${row.path || 'Selected file'} pending comparison`); }
-    node.append(element('span', row.status, 'badge')); $('#files').append(node);
+    node.append(element('span', row.status, 'badge'));
+    node.style.position = 'absolute'; node.style.top = `${(start + index) * rowHeight}px`; node.style.left = '0'; node.style.right = '0';
+    $('#files').append(node);
+    if (row.path === focusedPath) node.focus({ preventScroll: true });
   }
-  if (visibleRows.length > fileRowLimit) $('#files').append(button(`Show ${Math.min(fileRowLimit, visibleRows.length - fileRowLimit)} more`, () => { fileRowLimit += 200; renderFiles(); }, 'more-files'));
+}
+async function selectFile(pathname) {
+  const token = ++selectingEntry; const owner = workspaceId;
+  const row = await call('selectedEntry', pathname);
+  if (token !== selectingEntry || owner !== workspaceId) return;
+  selected = row; renderEditors(); renderFiles();
 }
 function treeRows(rows, filter) {
   const nodes = new Map([['', { path: '', name: '.', directory: true, depth: 0 }]]);
@@ -413,7 +486,7 @@ function treeRows(rows, filter) {
   return [...nodes.values()].filter(node => node.path && (!filter || matched.has(node.path))).sort((a, b) => a.path.localeCompare(b.path)).filter(node => {
     if (!node.path.includes('/')) return true;
     const parent = node.path.slice(0, node.path.lastIndexOf('/'));
-    return filter || expandedDirectories.has(parent);
+    return filter || parent.split('/').every((_, index, parts) => expandedDirectories.has(parts.slice(0, index + 1).join('/')));
   });
 }
 function loneComparison() {
@@ -426,7 +499,9 @@ function loneComparison() {
   return result;
 }
 function acceptSource(side, source) {
+  if (historyPicker?.side === side && historyPicker.generation !== source.generation && !historyPicker.selecting) $('#history-dialog').close();
   sourceState[side] = source;
+  if (source.status === 'loading' && source.progress?.progress === 0) inventories[side] = null;
   const ring = $(`#${side}-progress`);
   const progress = source.progress?.progress;
   ring.hidden = source.status !== 'loading' && progress !== 100;
@@ -434,8 +509,14 @@ function acceptSource(side, source) {
   if (source.status === 'ready') setTimeout(() => { ring.hidden = true; }, 150);
   if (source.status === 'error') notice(`${side} · ${source.error}`);
   else if (source.status === 'ready') notice();
+  // A retained comparison remains visible while refresh builds its replacement inventory.
+  if (workspaces.get(workspaceId)?.key) { renderSourceControls(); return; }
+  $('#open-comparison').disabled = !['left', 'right'].every(name => sourceState[name]?.status === 'ready')
+    || sourceState.left.tree?.directory !== sourceState.right.tree?.directory;
   const lone = loneComparison();
   if (lone) { comparison = lone; selected = lone.rows[0] ?? null; renderEditors(); renderFiles(); renderChanges(); }
+  else if (source.status !== 'ready') { comparison = null; selected = null; destroyViews(); showEmptyWorkspace(); renderFiles(); }
+  renderSourceControls();
 }
 function acceptComparison(next, reset = false) {
   const previous = comparison;
@@ -467,6 +548,7 @@ function acceptComparison(next, reset = false) {
     else for (const { view } of views) view.dispatch({});
   }
   renderFiles(); renderChanges();
+  renderSourceControls();
 }
 function transfer(from, to, range = null) {
   if (!to?.writable) throw new Error('Choose a writable destination');
@@ -634,8 +716,26 @@ $('#accept-disk').onclick = () => safely(() => resolveReview('disk'));
 $('#keep-local').onclick = () => safely(() => resolveReview('local'));
 $('#accept-merge').onclick = () => safely(() => resolveReview('merge'));
 
-const commands = { save: () => save(), 'save-as': () => saveAs(), undo: () => active && runHistory(active, 'undo'), redo: () => active && runHistory(active, 'redo') };
-for (const [id, action] of Object.entries(commands)) $(`#${id}`).onclick = () => safely(action);
+const commands = { save: () => save(), 'save-as': () => saveAs(), undo: () => active && runHistory(active, 'undo'), redo: () => active && runHistory(active, 'redo'), 'new-comparison': () => call('comparisonNew') };
+for (const [id, action] of Object.entries(commands)) {
+  const control = $(`#${id}`);
+  if (control) control.onclick = () => safely(action);
+}
+function openAbout() {
+  aboutReturnFocus = document.activeElement;
+  $('#about-title').textContent = application.name;
+  $('#about-version').textContent = `Version ${application.version}`;
+  $('#about-description').textContent = application.description;
+  $('#about-logo').src = application.logo;
+  $('#about-repository').href = application.repository;
+  $('#about-support').href = application.support;
+  $('#about-dialog').showModal();
+  $('#about-close').focus();
+}
+for (const [id, link] of [['about-repository', 'repository'], ['about-support', 'support']]) $(`#${id}`).onclick = event => { event.preventDefault(); safely(() => call('aboutLink', link)); };
+$('#about-close').onclick = () => $('#about-dialog').close();
+$('#about-dialog').addEventListener('close', () => aboutReturnFocus?.focus());
+commands.about = openAbout;
 commands['close-comparison'] = () => closeComparison();
 $('#layout').onchange = () => safely(async () => { applyAppearance(await call('preferences', { layout: $('#layout').value })); renderEditors(); });
 $('#theme').onchange = () => safely(async () => { applyAppearance(await call('preferences', { theme: $('#theme').value })); });
@@ -648,23 +748,36 @@ $('#preferences-save').onclick = () => safely(async () => {
   for (const doc of documents.values()) doc.setHistoryBudget(bytes);
   $('#preferences-dialog').close();
 });
-$('#filter').oninput = () => { fileRowLimit = 200; renderFiles(); };
-$('#file-view').onchange = () => { fileRowLimit = 200; renderFiles(); };
+$('#filter').oninput = () => { fileAnchor = null; $('#file-region').scrollTop = 0; renderFiles(); };
+$('#file-view').onchange = () => { fileAnchor = null; $('#file-region').scrollTop = 0; renderFiles(); };
+$('#file-region').onscroll = () => { const top = $('#file-region').scrollTop; const row = fileListing[Math.floor(top / 34)]; fileAnchor = row ? { path: row.path, offset: top % 34 } : null; renderFiles(); };
 $('#refresh').onclick = () => safely(() => call('refresh'));
 async function protectReplacement() {
+  if (comparison?.left && comparison?.right) return true;
   return protectDraft();
 }
 async function loadSource(side, value) {
+  const owner = workspaceId; const opened = Boolean(workspaces.get(owner)?.key);
   if (!value || !await protectReplacement()) return;
-  await call('sourceLoad', side, { kind: 'file', path: value });
+  if (!opened) await call('comparisonType', document.querySelector('input[name="comparison-type"]:checked').value);
+  try { await call('sourceLoad', side, { kind: 'file', path: value }); }
+  catch (error) {
+    if (opened && owner === workspaceId) {
+      const descriptor = sourceState[side]?.descriptor; const input = $(`#${side}-source`);
+      input.value = descriptor?.kind === 'git' ? `${descriptor.repo}/${descriptor.path ?? ''}` : descriptor?.path ?? '';
+      input.dataset.committed = input.value;
+    }
+    throw error;
+  }
   notice();
 }
 for (const side of ['left', 'right']) $(`#choose-${side}`).onclick = () => safely(async () => {
   const defaultPath = browse.linked ? browse.latest : browse.locations[side];
-  const file = await call('choose', { directory: $('#directories').checked, defaultPath });
+  const folder = document.querySelector('input[name="comparison-type"]:checked').value === 'folder';
+  const file = await call('choose', { directory: folder, defaultPath });
   if (!file) return;
   $(`#${side}-source`).value = file;
-  const location = $('#directories').checked ? file : file.slice(0, Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1) || file;
+  const location = folder ? file : file.slice(0, Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1) || file;
   browse.locations[side] = location; browse.latest = location;
   if (browse.linked) browse.locations.left = browse.locations.right = location;
   await loadSource(side, file);
@@ -686,14 +799,58 @@ for (const side of ['left', 'right']) {
   input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); input.dataset.committed = input.value; safely(() => loadSource(side, input.value)); } };
 }
 $('#sources').onsubmit = event => event.preventDefault();
+$('#open-comparison').onclick = () => safely(() => call('comparisonSubmit'));
+for (const input of document.querySelectorAll('input[name="comparison-type"]')) input.onchange = () => safely(async () => { if (await protectDraft()) acceptWorkspace(await call('comparisonType', input.value)); else renderSourceControls(); });
+$('#comparison-back').onclick = () => safely(() => call('comparisonBack'));
+$('#comparison-forward').onclick = () => safely(() => call('comparisonForward'));
+$('#toggle-comparisons').onclick = () => {
+  const region = $('#comparison-region');
+  const collapsed = region.classList.toggle('collapsed');
+  $('#toggle-comparisons').setAttribute('aria-expanded', String(!collapsed));
+};
 async function showHistory(side, generation) {
+  const owner = workspaceId;
   const opened = await call('historyOpen', side, generation);
-  historyPicker = { side, generation, id: opened.id, cursor: null, loading: false, lanes: [] };
+  if (owner !== workspaceId || generation !== sourceState[side]?.generation) { await call('historyClose', opened.id); return; }
+  historyPicker = { side, generation, owner, id: opened.id, cursor: null, loading: false, lanes: [] };
+  $('#history-reference').replaceChildren(new Option('Choose a reference…', ''));
+  for (const reference of opened.references ?? []) {
+    const option = new Option(reference.label, reference.label); option.dataset.commit = reference.id; option.title = reference.id;
+    $('#history-reference').append(option);
+  }
+  const revision = sourceState[side]?.tree?.revision;
+  $('#history-alias-label').hidden = !revision?.labels?.length;
+  $('#history-alias').replaceChildren(...(revision?.labels ?? []).map(label => new Option(label, label)));
+  $('#history-alias').value = workspaces.get(owner)?.aliases?.[`${side}:${revision?.id}`] ?? revision?.labels?.[0] ?? '';
+  $('#history-alias').title = revision?.id ?? '';
+  $('#history-alias').setAttribute('aria-label', `${side} revision display name`);
+  renderSourceControls();
   $('#history-list').replaceChildren(); $('#history-state').textContent = `History for ${opened.repository.repo}`;
   $('#history-dialog').showModal(); await nextHistoryPage();
 }
+async function chooseRevision(ref, label) {
+  const picker = historyPicker;
+  if (!picker || picker.selecting) return;
+  picker.selecting = true;
+  try {
+    await call('sourceCommit', picker.side, picker.generation, ref, picker.owner);
+    const record = workspaces.get(workspaceId);
+    if (label && record) record.aliases[`${picker.side}:${ref}`] = label;
+    renderSourceControls();
+  } finally { if (historyPicker === picker) $('#history-dialog').close(); }
+}
+$('#history-reference').onchange = () => {
+  const option = $('#history-reference').selectedOptions[0];
+  if (option?.dataset.commit) safely(() => chooseRevision(option.dataset.commit, option.value));
+};
+$('#history-alias').onchange = () => {
+  const picker = historyPicker; const record = workspaces.get(workspaceId);
+  if (!picker || picker.owner !== workspaceId || !record) return;
+  record.aliases[`${picker.side}:${sourceState[picker.side].tree.revision.id}`] = $('#history-alias').value;
+  renderEditors(); renderSourceControls();
+};
 async function nextHistoryPage() {
-  if (!historyPicker || historyPicker.loading) return;
+  if (!historyPicker || historyPicker.loading || historyPicker.end) return;
   const currentPicker = historyPicker;
   currentPicker.loading = true;
   try {
@@ -703,23 +860,13 @@ async function nextHistoryPage() {
       const lane = historyPicker.lanes.indexOf(commit.id);
       const laneIndex = lane < 0 ? historyPicker.lanes.push(commit.id) - 1 : lane;
       historyPicker.lanes.splice(laneIndex, 1, ...commit.parents);
-      const row = button('', async () => {
-        const picker = historyPicker;
-        if (!picker || picker.selecting) return;
-        // Retain the picker until its selection has loaded, even when loading forks the active comparison.
-        picker.selecting = true;
-        try { await call('sourceCommit', picker.side, picker.generation, commit.id); }
-        finally {
-          // A stale selection may fail, but it must never trap the user in a modal backed by a closed source generation.
-          if (historyPicker === picker) $('#history-dialog').close();
-        }
-      });
+      const row = button('', () => chooseRevision(commit.id));
       row.className = 'history-row'; row.title = commit.message;
       row.append(element('span', `${'│ '.repeat(laneIndex)}●`, 'history-graph'), element('span', commit.subject, 'history-subject'), element('span', commit.refs.join(' · '), 'history-refs'), element('span', `${commit.author} · ${commit.timestamp}`, 'history-meta'), element('code', commit.id, 'history-hash'));
       $('#history-list').append(row);
     }
     while ($('#history-list').childElementCount > 200) $('#history-list').firstElementChild.remove();
-    historyPicker.cursor = page.cursor; $('#history-more').disabled = page.end;
+    historyPicker.cursor = page.cursor; historyPicker.end = page.end; $('#history-more').disabled = page.end;
     if (page.end && !page.commits.length) $('#history-state').textContent = 'No commits are available for this repository.';
   } finally { currentPicker.loading = false; }
 }
@@ -729,30 +876,32 @@ $('#history-list').onscroll = () => {
   if (list.scrollTop + list.clientHeight >= list.scrollHeight - 40) safely(nextHistoryPage);
 };
 $('#history-close').onclick = () => $('#history-dialog').close();
+$('#history-working').onclick = () => safely(async () => {
+  const picker = historyPicker; const source = picker && sourceState[picker.side];
+  if (!picker || !source?.repository) return;
+  picker.selecting = true;
+  try { await call('sourceWorking', picker.side, picker.generation, picker.owner); }
+  finally { if (historyPicker === picker) $('#history-dialog').close(); }
+});
 $('#history-dialog').addEventListener('close', () => {
   const picker = historyPicker; historyPicker = null;
+  renderSourceControls();
   if (picker) safely(() => call('historyClose', picker.id));
 });
 $('#copy-left').onclick = () => safely(() => transfer(documentFor(selected.right, 'right', selected.path), documentFor(selected.left, 'left', selected.path)));
 $('#copy-right').onclick = () => safely(() => transfer(documentFor(selected.left, 'left', selected.path), documentFor(selected.right, 'right', selected.path)));
 for (const [id, direction] of [['previous', -1], ['next', 1]]) $(`#${id}`).onclick = () => navigation?.next(direction);
-let gitChoice;
-function offerGitChoice(event) {
-  if (!event.repository) return;
-  gitChoice = { ...event, workspaceId };
-  $('#git-choice-message').textContent = `Choose a historical Git version for the ${event.side} source? Yes opens the commit picker. No loads or keeps the current working version from disk.`;
-  if (!$('#git-choice-dialog').open) $('#git-choice-dialog').showModal();
+for (const side of ['left', 'right']) {
+  const control = $(`#${side}-version`);
+  control.onclick = () => safely(() => showHistory(side, sourceState[side]?.generation));
+  control.onkeydown = event => { if (event.key === 'ArrowDown') { event.preventDefault(); control.click(); } };
 }
-$('#git-choice-no').onclick = () => $('#git-choice-dialog').close();
-$('#git-choice-yes').onclick = () => safely(async () => {
-  const choice = gitChoice; $('#git-choice-dialog').close();
-  if (choice?.workspaceId === workspaceId && sourceState[choice.side]?.generation === choice.generation) await showHistory(choice.side, choice.generation);
-});
 host.onEvent(event => safely(async () => {
   if (!preferences) return;
-  if (event.type === 'workspace') { acceptWorkspace(event.workspace, event.comparisons); return; }
-  if (event.type === 'recent-open') { await switchComparison(() => call('recentOpen', event.key)); return; }
+  if (event.type === 'workspace') { acceptWorkspace(event.workspace, event.comparisons, event.groups); return; }
+  if (event.type === 'recent-open') { await call('recentOpen', event.key); return; }
   if (event.workspaceId && event.workspaceId !== workspaceId && event.type !== 'disk') return;
+  if (event.side && event.generation !== undefined && event.type !== 'source' && event.generation !== sourceState[event.side]?.generation) return;
   if (event.type === 'comparison') acceptComparison(event.result);
   else if (event.type === 'source-labels') {
     if (sourceState[event.side]?.generation !== event.generation) return;
@@ -762,14 +911,20 @@ host.onEvent(event => safely(async () => {
       const doc = documents.get(node.dataset.document);
       if (doc) node.replaceWith(title(doc, node.dataset.sourceSide));
     }
-    syncDocuments();
+    syncDocuments(); renderSourceControls();
   }
   else if (event.type === 'source') acceptSource(event.side, event.source);
-  else if (event.type === 'source-inventory') { inventories[event.side] = event.inventory; renderFiles(); }
+  else if (event.type === 'source-inventory') {
+    const entries = event.inventory.offset === 0 ? [] : inventories[event.side]?.entries ?? [];
+    if (event.inventory.offset !== entries.length) return;
+    entries.push(...event.inventory.entries);
+    inventories[event.side] = { ...event.inventory, entries };
+    scheduleFiles();
+  }
   else if (event.type === 'source-progress') { acceptSource(event.side, { ...sourceState[event.side], status: 'loading', progress: event.progress }); notice(`${event.side} · ${event.progress.phase} · ${event.progress.progress}% estimated`); }
   else if (event.type === 'source-repository') {
     sourceState[event.side] = { ...sourceState[event.side], repository: event.repository, generation: event.generation };
-    if (!workspaceChanging) offerGitChoice(event);
+    renderSourceControls();
   }
   else if (event.type === 'source-repository-unavailable') notice(`Commit selection unavailable: ${event.error}`);
   else if (event.type === 'comparison-error') notice(event.error);
@@ -795,12 +950,14 @@ host.onEvent(event => safely(async () => {
   }
 }));
 await safely(async () => {
-  const bootstrap = await call('bootstrap'); applyAppearance(bootstrap);
+  const bootstrap = await call('bootstrap'); applyAppearance(bootstrap); application = bootstrap.application;
   if (bootstrap.comparison?.base) preferences.layout = 'merge';
   $('#layout').value = preferences.layout;
-  if (bootstrap.workspace) acceptWorkspace(bootstrap.workspace, bootstrap.comparisons);
+  if (bootstrap.workspace) acceptWorkspace(bootstrap.workspace, bootstrap.comparisons, bootstrap.groups);
   else if (bootstrap.comparison) acceptComparison(bootstrap.comparison, true);
   if (host.sourceState) Object.assign(sourceState, await call('sourceState'));
-  for (const node of document.querySelectorAll('#sources input, #sources button')) node.disabled = false;
+  for (const node of document.querySelectorAll('#sources input, #sources button:not(#open-comparison)')) node.disabled = false;
+  $('#open-comparison').disabled = !['left', 'right'].every(side => sourceState[side]?.status === 'ready');
   document.documentElement.dataset.ready = 'true';
+  renderSourceControls();
 });
